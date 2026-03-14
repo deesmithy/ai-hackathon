@@ -3,16 +3,16 @@ from database import SessionLocal
 from models import Contractor
 
 SEED_CONTRACTORS = [
-    {"name": "Mike Rodriguez", "email": "mike@example.com", "phone": "555-0101", "specialty": "framing", "rating": 5},
-    {"name": "Sarah Chen", "email": "sarah@example.com", "phone": "555-0102", "specialty": "electrical", "rating": 5},
-    {"name": "James Wilson", "email": "james@example.com", "phone": "555-0103", "specialty": "plumbing", "rating": 4},
-    {"name": "Maria Garcia", "email": "maria@example.com", "phone": "555-0104", "specialty": "roofing", "rating": 5},
-    {"name": "Tom Baker", "email": "tom@example.com", "phone": "555-0105", "specialty": "hvac", "rating": 4},
-    {"name": "Lisa Park", "email": "lisa@example.com", "phone": "555-0106", "specialty": "painting", "rating": 5},
-    {"name": "Dave Thompson", "email": "dave@example.com", "phone": "555-0107", "specialty": "concrete", "rating": 4},
-    {"name": "Nina Patel", "email": "nina@example.com", "phone": "555-0108", "specialty": "drywall", "rating": 5},
-    {"name": "Carlos Mendez", "email": "carlos@example.com", "phone": "555-0109", "specialty": "flooring", "rating": 4},
-    {"name": "Amy Foster", "email": "amy@example.com", "phone": "555-0110", "specialty": "landscaping", "rating": 5},
+    {"name": "Mike Rodriguez", "email": "subcontractorpodiumhackathon+mikerodriguez@gmail.com", "phone": "555-0101", "specialty": "framing", "rating": 5},
+    {"name": "Sarah Chen", "email": "subcontractorpodiumhackathon+sarahchen@gmail.com", "phone": "555-0102", "specialty": "electrical", "rating": 5},
+    {"name": "James Wilson", "email": "subcontractorpodiumhackathon+jameswilson@gmail.com", "phone": "555-0103", "specialty": "plumbing", "rating": 4},
+    {"name": "Maria Garcia", "email": "subcontractorpodiumhackathon+mariagarcia@gmail.com", "phone": "555-0104", "specialty": "roofing", "rating": 5},
+    {"name": "Tom Baker", "email": "subcontractorpodiumhackathon+tombaker@gmail.com", "phone": "555-0105", "specialty": "hvac", "rating": 4},
+    {"name": "Lisa Park", "email": "subcontractorpodiumhackathon+lisapark@gmail.com", "phone": "555-0106", "specialty": "painting", "rating": 5},
+    {"name": "Dave Thompson", "email": "subcontractorpodiumhackathon+davethompson@gmail.com", "phone": "555-0107", "specialty": "concrete", "rating": 4},
+    {"name": "Nina Patel", "email": "subcontractorpodiumhackathon+ninapatel@gmail.com", "phone": "555-0108", "specialty": "drywall", "rating": 5},
+    {"name": "Carlos Mendez", "email": "subcontractorpodiumhackathon+carlosmendez@gmail.com", "phone": "555-0109", "specialty": "flooring", "rating": 4},
+    {"name": "Amy Foster", "email": "subcontractorpodiumhackathon+amyfoster@gmail.com", "phone": "555-0110", "specialty": "landscaping", "rating": 5},
 ]
 
 

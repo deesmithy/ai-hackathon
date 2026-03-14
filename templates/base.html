@@ -5,22 +5,77 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Superintendent AI{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                colors: {
+                    brand: {
+                        50: '#fdf8f0', 100: '#faebd7', 200: '#f4d5a8',
+                        300: '#edb96e', 400: '#e6993a', 500: '#d97706',
+                        600: '#b45309', 700: '#92400e', 800: '#78350f', 900: '#451a03',
+                    },
+                    surface: {
+                        50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0',
+                        300: '#cbd5e1', 400: '#94a3b8', 500: '#64748b',
+                    }
+                }
+            }
+        }
+    }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .glass { background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); }
+        .card-hover { transition: all 0.2s ease; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 12px 24px -8px rgba(0,0,0,0.12); }
+        .gradient-border { background: linear-gradient(135deg, #d97706 0%, #ea580c 100%); }
+        .nav-link { position: relative; padding: 0.5rem 0; }
+        .nav-link::after { content:''; position:absolute; bottom:0; left:0; width:0; height:2px; background:#d97706; transition: width 0.2s ease; }
+        .nav-link:hover::after, .nav-link.active::after { width: 100%; }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .shimmer { background: linear-gradient(110deg, #f1f5f9 8%, #e2e8f0 18%, #f1f5f9 33%); background-size: 200% 100%; animation: shimmer 1.5s linear infinite; }
+        @keyframes shimmer { to { background-position: -200% 0; } }
+    </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <nav class="bg-indigo-700 text-white shadow-lg">
-        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <a href="/" class="text-xl font-bold tracking-tight">Superintendent AI</a>
-            <div class="flex space-x-6 text-sm font-medium">
-                <a href="/" class="hover:text-indigo-200">Dashboard</a>
-                <a href="/projects/new" class="hover:text-indigo-200">New Project</a>
-                <a href="/contractors" class="hover:text-indigo-200">Contractors</a>
-                <a href="/emails" class="hover:text-indigo-200">Email Log</a>
+<body class="bg-surface-50 min-h-screen">
+    <!-- Top Nav -->
+    <nav class="sticky top-0 z-50 glass border-b border-surface-200">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="flex items-center justify-between h-16">
+                <a href="/" class="flex items-center space-x-3 group">
+                    <div class="w-9 h-9 rounded-lg gradient-border flex items-center justify-center shadow-sm">
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M2 21h20M3 7v14M21 7v14M7 3h10l1 4H6l1-4zM7 11h2v3H7zM11 11h2v3h-2zM15 11h2v3h-2zM7 17h2v4H7zM15 17h2v4h-2z"/>
+                        </svg>
+                    </div>
+                    <span class="text-lg font-bold text-gray-900 tracking-tight">Superintendent<span class="text-brand-600">.ai</span></span>
+                </a>
+                <div class="flex items-center space-x-8">
+                    {% set current_path = request.url.path if request else '/' %}
+                    <a href="/" class="nav-link text-sm font-medium {{ 'text-brand-700 active' if current_path == '/' else 'text-surface-500 hover:text-gray-900' }}">Dashboard</a>
+                    <a href="/projects/new" class="nav-link text-sm font-medium {{ 'text-brand-700 active' if current_path == '/projects/new' else 'text-surface-500 hover:text-gray-900' }}">New Project</a>
+                    <a href="/contractors" class="nav-link text-sm font-medium {{ 'text-brand-700 active' if current_path == '/contractors' else 'text-surface-500 hover:text-gray-900' }}">Contractors</a>
+                    <a href="/emails" class="nav-link text-sm font-medium {{ 'text-brand-700 active' if current_path == '/emails' else 'text-surface-500 hover:text-gray-900' }}">Emails</a>
+                </div>
             </div>
         </div>
     </nav>
-    <main class="max-w-7xl mx-auto px-4 py-8">
+
+    <main class="max-w-7xl mx-auto px-6 py-8 fade-in">
         {% block content %}{% endblock %}
     </main>
+
+    <footer class="border-t border-surface-200 mt-auto">
+        <div class="max-w-7xl mx-auto px-6 py-4">
+            <p class="text-xs text-surface-400 text-center">Superintendent AI &mdash; AI-powered construction project management</p>
+        </div>
+    </footer>
 </body>
 </html>

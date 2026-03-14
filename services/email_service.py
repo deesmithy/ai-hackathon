@@ -21,7 +21,11 @@ def send_email_via_gmail(to_email: str, to_name: str, subject: str, body: str) -
         print(f"[EMAIL STUB] Would send to {to_email}: {subject}")
         return "stub-no-gmail-creds"
 
-    msg = MIMEText(body)
+    # Sanitize non-breaking spaces and other unicode whitespace that Claude may produce
+    subject = subject.replace("\xa0", " ")
+    body = body.replace("\xa0", " ")
+
+    msg = MIMEText(body, _charset="utf-8")
     msg["Subject"] = subject
     msg["From"] = f"Superintendent AI <{gmail_user}>"
     msg["To"] = f"{to_name} <{to_email}>"
