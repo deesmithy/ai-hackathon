@@ -425,6 +425,44 @@ def advance_termination_flow(flow_id: int, new_status: str) -> dict:
             flow.replacement_confirmed_at = now
         elif new_status == "termination_sent":
             flow.termination_sent_at = now
+            # Swap contractors: retire outgoing, assign incoming
+            task = db.query(Task).get(flow.task_id)
+            if task:
+                # Mark outgoing as no_response so they're excluded from future queries
+                outgoing_entry = db.query(OutreachQueue).filter(
+                    OutreachQueue.task_id == flow.task_id,
+                    OutreachQueue.contractor_id == flow.outgoing_contractor_id,
+                ).first()
+                if outgoing_entry:
+                    outgoing_entry.status = "no_response"
+                    outgoing_entry.responded_at = now
+
+                # Create or update incoming contractor's outreach entry as accepted
+                incoming_entry = db.query(OutreachQueue).filter(
+                    OutreachQueue.task_id == flow.task_id,
+                    OutreachQueue.contractor_id == flow.incoming_contractor_id,
+                ).first()
+                if incoming_entry:
+                    incoming_entry.status = "accepted"
+                    incoming_entry.responded_at = now
+                else:
+                    from sqlalchemy import func
+                    max_priority = db.query(func.max(OutreachQueue.priority_order)).filter(
+                        OutreachQueue.task_id == flow.task_id
+                    ).scalar() or 0
+                    incoming_entry = OutreachQueue(
+                        task_id=flow.task_id,
+                        contractor_id=flow.incoming_contractor_id,
+                        priority_order=max_priority + 1,
+                        status="accepted",
+                        sent_at=now,
+                        responded_at=now,
+                    )
+                    db.add(incoming_entry)
+
+                task.status = "committed"
+                task.dates_confirmed = False  # new contractor needs to confirm dates
+                task.updated_at = now
         elif new_status == "complete":
             pass
 
