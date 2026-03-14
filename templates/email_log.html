@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Email Log — Superintendent AI{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-900 mb-6">Email Log</h1>
+
+{% if emails %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+            <tr>
+                <th class="px-6 py-3 text-left">Direction</th>
+                <th class="px-6 py-3 text-left">Subject</th>
+                <th class="px-6 py-3 text-left">To / From</th>
+                <th class="px-6 py-3 text-left">Date</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for email in emails %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-3">
+                    <span class="text-xs font-medium px-2 py-0.5 rounded-full {{ 'bg-blue-100 text-blue-700' if email.direction == 'outbound' else 'bg-green-100 text-green-700' }}">
+                        {{ email.direction | title }}
+                    </span>
+                </td>
+                <td class="px-6 py-3">
+                    <div class="font-medium text-gray-900">{{ email.subject }}</div>
+                    <div class="text-gray-400 text-xs mt-0.5">{{ email.body[:100] }}{% if email.body and email.body|length > 100 %}...{% endif %}</div>
+                </td>
+                <td class="px-6 py-3 text-gray-600">{{ email.to_email if email.direction == 'outbound' else email.from_email }}</td>
+                <td class="px-6 py-3 text-gray-400 text-xs">{{ email.created_at.strftime('%b %d, %Y %H:%M') }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="text-center py-16 text-gray-400">
+    <p class="text-lg">No emails yet</p>
+    <p class="text-sm mt-1">Emails will appear here after running outreach on a project.</p>
+</div>
+{% endif %}
+{% endblock %}
