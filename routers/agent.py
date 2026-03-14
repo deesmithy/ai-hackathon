@@ -6,7 +6,7 @@ from datetime import datetime
 from database import get_db
 from models import Project, Email, Task, OutreachQueue, TerminationFlow, Contractor, Alert
 from schemas import GeneratePlanRequest, AssignContractorsRequest, RunOutreachRequest, CheckStatusRequest, ProcessReplyRequest, EvaluateTerminationRequest, ApproveTerminationRequest, CancelTerminationRequest, TerminationFlowOut, DemoTerminationRequest, RegenerateTasksRequest, ReassignContractorsRequest
-from agent.agent import run_agent, generate_tasks_direct, assign_and_draft_direct
+from agent.agent import run_agent, generate_tasks_direct, assign_and_draft_direct, generate_plan_and_assign_direct
 from services.contractor_service import get_contractor_by_email
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -90,6 +90,60 @@ def _save_tasks_from_dicts(db, project_id: int, task_dicts: list[dict]) -> list[
         }
         for task, _ in inserted
     ]
+
+
+def _save_tasks_and_assignments(db, project_id: int, task_dicts: list[dict]) -> list[dict]:
+    """Bulk-insert tasks + outreach queue entries from the combined plan+assign output."""
+    inserted = []
+    for t in task_dicts:
+        task = Task(
+            project_id=project_id,
+            name=t["name"],
+            description=t.get("description"),
+            specialty_needed=t.get("specialty_needed"),
+            estimated_days=t.get("estimated_days"),
+            sequence_order=t.get("sequence_order", 0),
+        )
+        db.add(task)
+        db.flush()
+        inserted.append((task, t.get("depends_on_sequence"), t.get("contractor_id")))
+
+    # Resolve depends_on references
+    seq_to_id = {task.sequence_order: task.id for task, _, _ in inserted}
+    for task, dep_seq, _ in inserted:
+        if dep_seq and dep_seq in seq_to_id:
+            task.depends_on_task = seq_to_id[dep_seq]
+
+    # Create outreach queue entries
+    for task, _, contractor_id in inserted:
+        if contractor_id:
+            db.add(OutreachQueue(
+                task_id=task.id,
+                contractor_id=contractor_id,
+                priority_order=1,
+            ))
+            task.status = "assigned"
+
+    db.commit()
+
+    # Build response with contractor details
+    result = []
+    for task, _, contractor_id in inserted:
+        contractor = db.query(Contractor).filter(Contractor.id == contractor_id).first() if contractor_id else None
+        result.append({
+            "task_id": task.id,
+            "task_name": task.name,
+            "description": task.description,
+            "specialty_needed": task.specialty_needed,
+            "estimated_days": task.estimated_days,
+            "sequence_order": task.sequence_order,
+            "contractor_id": contractor.id if contractor else None,
+            "contractor_name": contractor.name if contractor else "Unassigned",
+            "rating_reliability": contractor.rating_reliability if contractor else None,
+            "rating_quality": contractor.rating_quality if contractor else None,
+            "rating_price": contractor.rating_price if contractor else None,
+        })
+    return result
 
 
 def _auto_schedule_tasks(db: Session, project_id: int):
@@ -265,9 +319,9 @@ async def create_and_plan(
     db.refresh(project)
 
     user_msg = _build_plan_user_msg(project)
-    task_dicts = generate_tasks_direct(user_msg)
-    task_list = _save_tasks_from_dicts(db, project.id, task_dicts)
-    return {"project_id": project.id, "tasks": task_list}
+    task_dicts = generate_plan_and_assign_direct(user_msg)
+    items = _save_tasks_and_assignments(db, project.id, task_dicts)
+    return {"project_id": project.id, "items": items}
 
 
 @router.post("/generate-plan")
@@ -301,14 +355,10 @@ def regenerate_tasks(data: RegenerateTasksRequest, db: Session = Depends(get_db)
 
     user_msg = _build_plan_user_msg(project)
     user_msg += f"\nUser feedback: {data.feedback}\nPlease revise accordingly."
-    task_dicts = generate_tasks_direct(user_msg)
-    task_list = _save_tasks_from_dicts(db, project.id, task_dicts)
-    _auto_schedule_tasks(db, project.id)
+    task_dicts = generate_plan_and_assign_direct(user_msg)
+    items = _save_tasks_and_assignments(db, project.id, task_dicts)
 
-    # Automatically assign contractors and send outreach
-    _auto_assign_and_outreach(project.id, project.name)
-
-    return {"project_id": project.id, "tasks": task_list}
+    return {"project_id": project.id, "items": items}
 
 
 @router.post("/assign-contractors")

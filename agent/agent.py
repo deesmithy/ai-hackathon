@@ -122,6 +122,81 @@ MODE_CONFIG = {
 }
 
 
+def generate_plan_and_assign_direct(user_message: str) -> list[dict]:
+    """Generate tasks AND assign contractors in a single Haiku call.
+
+    Returns a list of dicts with task fields + contractor_id embedded,
+    so the frontend can display tasks and assignments in one step.
+    """
+    from agent.tools import get_contractor_roster
+
+    roster = get_contractor_roster()
+    specialties = sorted({c["specialty"] for c in roster})
+
+    # Build a compact roster string: specialty → [(id, name, rel, qual)]
+    roster_lines = []
+    for c in roster:
+        roster_lines.append(
+            f"  id={c['id']} {c['name']} ({c['specialty']}) "
+            f"reliability={c['rating_reliability']} quality={c['rating_quality']}"
+        )
+    roster_str = "\n".join(roster_lines)
+
+    submit_tool = {
+        "name": "submit_plan",
+        "description": "Submit the complete task plan with contractor assignments.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "specialty_needed": {"type": "string", "enum": specialties},
+                            "estimated_days": {"type": "integer"},
+                            "sequence_order": {"type": "integer"},
+                            "depends_on_sequence": {"type": "integer", "description": "sequence_order of upstream task, omit if none"},
+                            "contractor_id": {"type": "integer", "description": "ID of the best matching contractor from the roster"},
+                        },
+                        "required": ["name", "description", "specialty_needed", "estimated_days", "sequence_order", "contractor_id"],
+                    },
+                }
+            },
+            "required": ["tasks"],
+        },
+    }
+
+    system = (
+        "You are a construction superintendent AI. Given a project description and a contractor roster:\n"
+        "1. Break the project into 5–15 ordered construction tasks (site prep/concrete → framing → rough-in trades → drywall → finishes → exterior).\n"
+        "2. For each task, assign the best contractor by matching specialty, then ranking by reliability + quality.\n"
+        "Use only the specialties and contractor IDs listed in the roster."
+    )
+
+    full_message = (
+        f"{user_message}\n\n"
+        f"Contractor roster:\n{roster_str}"
+    )
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=4096,
+        system=system,
+        tools=[submit_tool],
+        tool_choice={"type": "tool", "name": "submit_plan"},
+        messages=[{"role": "user", "content": full_message}],
+    )
+
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_plan":
+            return block.input.get("tasks", [])
+
+    return []
+
+
 def generate_tasks_direct(user_message: str) -> list[dict]:
     """Generate a task plan in a single Claude API call using forced structured output.
 
