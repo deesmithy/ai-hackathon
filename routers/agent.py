@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Form, UploadFile, File
+from typing import Optional
+from datetime import date as date_type
 from sqlalchemy.orm import Session
 from datetime import datetime
 from database import get_db
@@ -228,6 +230,44 @@ def _auto_assign_and_outreach(project_id: int, project_name: str):
         db.commit()
     finally:
         db.close()
+
+
+@router.post("/create-and-plan")
+async def create_and_plan(
+    name: str = Form(...),
+    description: str = Form(...),
+    start_date: Optional[str] = Form(None),
+    target_end_date: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+):
+    """Create a project and generate its task plan in a single request."""
+    uploaded_file_content = None
+    if file:
+        raw = await file.read()
+        if file.filename and file.filename.lower().endswith(".pdf"):
+            import fitz
+            doc = fitz.open(stream=raw, filetype="pdf")
+            uploaded_file_content = "\n".join(page.get_text() for page in doc)
+            doc.close()
+        else:
+            uploaded_file_content = raw.decode("utf-8", errors="ignore")
+
+    project = Project(
+        name=name,
+        description=description,
+        start_date=date_type.fromisoformat(start_date) if start_date else None,
+        target_end_date=date_type.fromisoformat(target_end_date) if target_end_date else None,
+        uploaded_file_content=uploaded_file_content,
+    )
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    user_msg = _build_plan_user_msg(project)
+    task_dicts = generate_tasks_direct(user_msg)
+    task_list = _save_tasks_from_dicts(db, project.id, task_dicts)
+    return {"project_id": project.id, "tasks": task_list}
 
 
 @router.post("/generate-plan")

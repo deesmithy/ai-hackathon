@@ -270,18 +270,10 @@ function projectForm() {
                 if (this.target_end_date) formData.append('target_end_date', this.target_end_date);
                 if (this.file) formData.append('file', this.file);
 
-                const createRes = await fetch('/api/projects/', { method: 'POST', body: formData });
-                if (!createRes.ok) throw new Error('Failed to create project');
-                const project = await createRes.json();
-                this.projectId = project.id;
-
-                const planRes = await fetch('/api/agent/generate-plan', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ project_id: project.id })
-                });
+                const planRes = await fetch('/api/agent/create-and-plan', { method: 'POST', body: formData });
                 if (!planRes.ok) throw new Error('Failed to generate plan');
                 const planData = await planRes.json();
+                this.projectId = planData.project_id;
                 this.tasks = planData.tasks;
                 this.step = 2;
             } catch (e) {
