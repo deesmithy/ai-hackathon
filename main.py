@@ -191,7 +191,7 @@ def project_detail_page(project_id: int, request: Request, db: Session = Depends
             }
         threads[key]["emails"].append(e)
 
-    email_threads = sorted(threads.values(), key=lambda t: t["task_sequence_order"])
+    email_threads = sorted(threads.values(), key=lambda t: t["emails"][-1].created_at, reverse=True)
 
     # Fetch termination flows for this project
     termination_flows = (

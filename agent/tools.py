@@ -258,9 +258,21 @@ def _reschedule_downstream_from_tool(db, changed_task_id: int):
 
 
 def create_alert(project_id: int, alert_type: str, message: str, task_id: int | None = None) -> dict:
-    """Create a status alert."""
+    """Create a status alert. Auto-dismisses older unread alerts for the same task."""
     db = SessionLocal()
     try:
+        # Dismiss previous unread alerts for the same task so they don't pile up
+        # BUT never auto-dismiss termination_recommendation alerts — those need explicit approval
+        if task_id:
+            stale = db.query(Alert).filter(
+                Alert.project_id == project_id,
+                Alert.task_id == task_id,
+                Alert.is_read == False,
+                Alert.alert_type != "termination_recommendation",
+            ).all()
+            for s in stale:
+                s.is_read = True
+
         alert = Alert(
             project_id=project_id,
             task_id=task_id,
@@ -333,14 +345,24 @@ def create_termination_flow(task_id: int, outgoing_contractor_id: int,
         outgoing = db.query(Contractor).get(outgoing_contractor_id)
         incoming = db.query(Contractor).get(incoming_contractor_id)
 
+        outgoing_name = outgoing.name if outgoing else "contractor"
+        incoming_name = incoming.name if incoming else "contractor"
+
+        # Short, human-readable summary for the alert banner.
+        # The full AI-written reason lives on TerminationFlow.reason.
+        # Truncate the reason to one sentence for the alert.
+        short_reason = reason.split(".")[0].strip() + "." if "." in reason else reason
+        if len(short_reason) > 120:
+            short_reason = short_reason[:117] + "..."
+
         alert = Alert(
             project_id=task.project_id,
             task_id=task_id,
             alert_type="termination_recommendation",
             message=(
-                f"Termination recommended for {outgoing.name if outgoing else 'contractor'} "
-                f"on task '{task.name}'. Proposed replacement: {incoming.name if incoming else 'contractor'}. "
-                f"Reason: {reason} (Flow ID: {flow.id})"
+                f"Cliff recommends terminating {outgoing_name} from \"{task.name}\" "
+                f"and replacing them with {incoming_name}. "
+                f"{short_reason} (Flow ID: {flow.id})"
             ),
         )
         db.add(alert)
@@ -434,7 +456,25 @@ def advance_termination_flow(flow_id: int, new_status: str) -> dict:
         now = datetime.utcnow()
 
         if new_status == "replacement_outreach_sent":
-            pass  # superintendent_approved_at set by the API endpoint
+            # Create an outreach queue entry for the incoming contractor so they
+            # appear in the inject-email UI and send_email can find them
+            task = db.query(Task).get(flow.task_id)
+            existing = db.query(OutreachQueue).filter(
+                OutreachQueue.task_id == flow.task_id,
+                OutreachQueue.contractor_id == flow.incoming_contractor_id,
+            ).first()
+            if not existing:
+                from sqlalchemy import func
+                max_priority = db.query(func.max(OutreachQueue.priority_order)).filter(
+                    OutreachQueue.task_id == flow.task_id
+                ).scalar() or 0
+                db.add(OutreachQueue(
+                    task_id=flow.task_id,
+                    contractor_id=flow.incoming_contractor_id,
+                    priority_order=max_priority + 1,
+                    status="sent",
+                    sent_at=now,
+                ))
         elif new_status == "replacement_confirmed":
             flow.replacement_confirmed_at = now
         elif new_status == "termination_sent":

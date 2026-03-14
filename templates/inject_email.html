@@ -37,11 +37,12 @@ const TASK_CONTRACTORS = [
     fillTemplate(tpl) {
         const name = this.selected ? this.selected.contractor_name : 'Contractor';
         const templates = {
-            accept: 'Hi,\n\nI am happy to accept this job. The dates and scope work for me — looking forward to it.\n\nBest,\n' + name,
+            accept: 'Hi Cliff,\n\nYes, I am available and happy to take this on! I can start as soon as needed. Send over any details and I will make it happen.\n\nBest,\n' + name,
             cancel: 'Hi,\n\nUnfortunately I need to cancel. I have taken on another project that conflicts with this timeline and I am no longer available.\n\nSorry for the inconvenience.\n\nBest,\n' + name,
             delay: 'Hi,\n\nI need to push my start date back by two weeks due to a delay on my current job. I can now start on the dates we discussed plus 14 days. Please let me know if that works.\n\nThanks,\n' + name,
             decline: 'Hi,\n\nI have a conflict on the scheduled dates and cannot make it work. I will need to decline this job.\n\nApologies,\n' + name,
             question: 'Hello,\n\nI have a question about the scope — can you clarify what materials are included and whether I need to supply my own equipment?\n\nThanks,\n' + name,
+            angry: 'This is completely unacceptable! I cleared my schedule for this job and you are firing me over email? I expect full payment or I will be speaking with my attorney. Do not contact me again.\n\n' + name,
         };
         this.body = templates[tpl] || '';
     },
@@ -76,14 +77,21 @@ const TASK_CONTRACTORS = [
 
     <!-- Success state -->
     <div x-show="sent" x-cloak class="rounded-xl border border-emerald-200 bg-emerald-50 p-8 text-center">
-        <svg class="w-10 h-10 text-emerald-500 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <p class="text-emerald-800 font-semibold text-lg">Email processed by agent</p>
-        <p class="text-emerald-600 text-sm mt-1">Check the Agent Log and Emails tabs for the agent's response.</p>
+        <svg class="animate-spin w-8 h-8 text-emerald-500 mx-auto mb-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        <p class="text-emerald-800 font-semibold text-lg">Email sent — Cliff is reading it now...</p>
+        <p class="text-emerald-600 text-sm mt-1">Redirecting to project page. Check Emails and Agent Log tabs for Cliff's response.</p>
         <div class="flex gap-3 justify-center mt-5">
-            <a href="/projects/{{ project.id }}" class="px-5 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors">View Project</a>
+            <a href="/projects/{{ project.id }}" class="px-5 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors">View Project Now</a>
             <button @click="sent=false; selectedIdx=null; body=''" class="px-5 py-2 rounded-lg border border-surface-200 text-sm font-semibold text-gray-700 hover:bg-surface-50 transition-colors">Send Another</button>
         </div>
+        <script>
+        // Auto-redirect to project page after a short delay so Cliff has time to start processing
+        document.addEventListener('alpine:init', () => {});
+        </script>
     </div>
+    <template x-if="sent">
+        <div x-init="setTimeout(() => window.location.href = '/projects/{{ project.id }}', 3000)"></div>
+    </template>
 
     <!-- Form -->
     <div x-show="!sent">
@@ -155,6 +163,10 @@ const TASK_CONTRACTORS = [
                         <button type="button" @click="fillTemplate('question')"
                             class="text-xs px-2.5 py-1 rounded-md border border-surface-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors">
                             Question
+                        </button>
+                        <button type="button" @click="fillTemplate('angry')"
+                            class="text-xs px-2.5 py-1 rounded-md border border-surface-200 hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors">
+                            Angry / Legal threat
                         </button>
                     </div>
                     <textarea x-model="body" rows="8"

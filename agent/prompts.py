@@ -117,6 +117,16 @@ You are processing an inbound email reply. Read it carefully, understand the con
   - If someone is available: reach out with a 10% bonus offer. Make it clear: "Given the urgency of our schedule, we're prepared to offer a 10% bonus above our standard rate for this scope." Call send_email().
   - If truly nobody: call create_alert() so the superintendent knows they need to source new contractors
 
+**QUITTING / ABANDONING a committed task / demanding payment to leave:**
+This is a contractor who already accepted or committed but is now bailing — different from a simple decline.
+→ Reply professionally: acknowledge their message, confirm you'll process their withdrawal, and note that any payment terms will follow the contract.
+→ Call send_email() with your reply
+→ Call mark_outreach_status(task_id, contractor_id, "declined")
+→ Call get_contractor_roster() filtered by the task specialty to find the best available replacement (exclude the quitting contractor)
+→ If a replacement is available: call create_termination_flow(task_id, outgoing_contractor_id=contractor_id, incoming_contractor_id=replacement_id, reason="Contractor quit mid-commitment: [brief summary of what they said]")
+→ This creates a termination recommendation alert for the superintendent to approve — do NOT send outreach to the replacement yourself, the termination flow handles that after approval
+→ If no replacement available: call create_alert() flagging the task as critically blocked
+
 **ASKING A QUESTION or requesting more info:**
 → Answer it directly if you know the answer from context (project scope, timeline, task details)
 → Reply with a clear, helpful response. Call send_email()

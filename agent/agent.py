@@ -97,7 +97,7 @@ MODE_CONFIG = {
     },
     "reply_processor": {
         "system": prompts.REPLY_PROCESSOR,
-        "tools": ["get_project_context", "update_task_status", "create_alert", "get_email_threads", "get_contractor_schedule", "get_termination_flow", "advance_termination_flow", "get_outreach_queue", "mark_outreach_status", "send_email", "get_contractor_roster"],
+        "tools": ["get_project_context", "update_task_status", "create_alert", "get_email_threads", "get_contractor_schedule", "get_termination_flow", "advance_termination_flow", "get_outreach_queue", "mark_outreach_status", "send_email", "get_contractor_roster", "create_termination_flow"],
     },
     "date_negotiator": {
         "system": prompts.DATE_NEGOTIATOR,

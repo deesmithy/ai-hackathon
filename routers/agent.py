@@ -556,7 +556,7 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
                     subject=data.subject,
                     body=data.body,
                     from_email=data.from_email,
-                    processed=True,  # already being processed — prevent scheduler from re-processing
+                    processed=True,
                 )
                 db.add(inbound)
                 db.commit()
@@ -675,6 +675,17 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
                 "termination_executor",
                 f"Execute stage 2: send termination notice and confirm new contract for termination flow ID {confirmed_flow.id}."
             )
+
+            # After executor stage 2: mark complete and generate executive summary
+            db.expire_all()
+            flow_after = db.query(TerminationFlow).filter(TerminationFlow.id == confirmed_flow.id).first()
+            if flow_after and flow_after.status == "termination_sent":
+                from agent.tools import advance_termination_flow as _advance
+                _advance(confirmed_flow.id, "complete")
+                run_agent(
+                    "termination_summarizer",
+                    f"Generate an executive summary for termination flow ID {confirmed_flow.id}."
+                )
 
         # Check if contractor declined → auto-assign next contractor and send outreach
         db.expire_all()
@@ -801,9 +812,14 @@ def cancel_termination(data: CancelTerminationRequest, db: Session = Depends(get
 
 @router.post("/demo-termination")
 def demo_termination(data: DemoTerminationRequest, db: Session = Depends(get_db)):
-    """Run a full termination demo: pick a committed contractor, fire them, simulate responses, generate summary."""
-    import random
-    from agent.tools import create_termination_flow as _create_flow, advance_termination_flow as _advance, get_contractor_roster as _roster
+    """Set up a termination scenario and have the AI recommend termination.
+
+    Stops at pending_approval — the superintendent must review the alert and
+    click Approve in the UI.  The rest of the flow (replacement outreach,
+    termination notice, summary) proceeds naturally via approve-termination
+    and process-reply as the user interacts.
+    """
+    from datetime import timedelta, date as _date
 
     # Find a task with an assigned/committed contractor
     task = (
@@ -822,125 +838,42 @@ def demo_termination(data: DemoTerminationRequest, db: Session = Depends(get_db)
         raise HTTPException(status_code=400, detail="No contractor assigned to task.")
 
     outgoing = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first()
-    project = db.query(Project).filter(Project.id == data.project_id).first()
 
-    # Find best replacement (different contractor, same specialty)
-    roster = _roster(task.specialty_needed)
-    replacements = [c for c in roster if c["id"] != outgoing.id]
-    if not replacements:
-        raise HTTPException(status_code=400, detail="No replacement contractor available with matching specialty.")
-    incoming_data = replacements[0]
-    incoming = db.query(Contractor).filter(Contractor.id == incoming_data["id"]).first()
-
-    # Step 1: Create termination flow
-    reason = (
-        f"{outgoing.name} confirmed the start date but has been completely unresponsive for 4 days — "
-        f"no replies to follow-up emails or calls. The project schedule is at risk of slipping."
-    )
-    flow_result = _create_flow(
-        task_id=task.id,
-        outgoing_contractor_id=outgoing.id,
-        incoming_contractor_id=incoming.id,
-        reason=reason,
-    )
-    flow_id = flow_result["flow_id"]
-
-    # Step 2: Superintendent approves (simulated)
-    flow = db.query(TerminationFlow).filter(TerminationFlow.id == flow_id).first()
-    flow.superintendent_approved_at = datetime.utcnow()
+    # Set up the scenario: mark task as committed with a past start date
+    # to simulate a contractor who confirmed but then ghosted
+    task.status = "committed"
+    if not task.scheduled_start or task.scheduled_start > _date.today():
+        task.scheduled_start = _date.today() - timedelta(days=5)
+        task.scheduled_end = _date.today() + timedelta(days=(task.estimated_days or 5))
+    outreach.status = "accepted"
+    outreach.sent_at = datetime.utcnow() - timedelta(days=7)
     db.commit()
 
-    # Step 3: Executor stage 1 — email replacement contractor
-    run_agent("termination_executor", f"Execute stage 1: send replacement outreach for termination flow ID {flow_id}.")
-
-    # Step 4: Simulate replacement confirming availability
-    _advance(flow_id, "replacement_confirmed")
-
-    # Simulate incoming contractor's acceptance email
-    accept_body = (
-        f"Hi Cliff,\n\nThank you for reaching out! I'd be happy to take on the {task.name} work for {project.name}. "
-        f"I'm available and can start as soon as needed. Please send over any details and I'll make it happen.\n\n"
-        f"Looking forward to working with you.\n\nBest,\n{incoming.name}"
+    # Run termination_advisor — evaluates the situation, argues the case,
+    # and creates the flow at pending_approval with a superintendent alert
+    result = run_agent(
+        "termination_advisor",
+        f"Evaluate whether contractor {outgoing.name} (ID: {outgoing.id}) should be terminated from "
+        f"task ID {task.id} ('{task.name}') in project ID {data.project_id}. "
+        f"Use get_project_context with project_id={data.project_id} and get_email_threads with task_id={task.id}. "
+        f"The outgoing contractor ID is {outgoing.id}.\n\n"
+        f"Context: This contractor committed to the job and their scheduled start date was "
+        f"{task.scheduled_start}, but they have been completely unresponsive — no communication, "
+        f"no actual start, and no reply to follow-up emails for over 4 days. "
+        f"The project schedule is at risk. Evaluate this and recommend termination if warranted."
     )
-    db.add(Email(
-        task_id=task.id,
-        contractor_id=incoming.id,
-        direction="inbound",
-        subject=f"Re: [SUP-{task.id}] {task.name} - Availability Inquiry - {project.name}",
-        body=accept_body,
-        from_email=incoming.email,
-    ))
-    db.commit()
 
-    # Step 5: Executor stage 2 — send termination notice + confirm new contractor
-    run_agent("termination_executor", f"Execute stage 2: send termination notice and confirm new contract for termination flow ID {flow_id}.")
-
-    # Step 6: Simulate the fired contractor's reply (random emotional response)
-    fired_replies = [
-        (
-            "This is absolutely unacceptable! I cleared my entire schedule for this job. "
-            "You can't just terminate me over an email with no phone call first. "
-            "50% is not enough — I expect full payment or I will be consulting my attorney. "
-            "Do not contact me further until this is resolved properly."
-        ),
-        (
-            f"Hi Cliff, I owe you an apology. I had a serious family emergency and completely dropped the ball on communication. "
-            f"I understand if you've moved on, but is there any chance we can work something out? "
-            f"I'm available now and would really like to make this right. "
-            f"If not, I understand — just let me know about the 50% payment timeline."
-        ),
-        (
-            "Message received. I accept the termination. "
-            "Please confirm the 50% payment will be processed to my account on file within 30 days. "
-            "It's been a pleasure working with you in the past and I hope we can work together again in the future."
-        ),
-        (
-            "Wait — what?! I've been trying to reach you all week! My emails must have been going to spam. "
-            "I am ready to start right now. Can we please get on a call today? "
-            "I really don't want to lose this contract — I've already ordered materials."
-        ),
-        (
-            "Cliff, I'm very disappointed. I've been a reliable contractor for years and this feels like a blindside. "
-            "I did reach out twice but got no response from your side either. "
-            "I'll accept the 50% but I want it on record that this communication went both ways. "
-            "Please send payment details when ready."
-        ),
-    ]
-    fired_body = random.choice(fired_replies)
-    fired_subject = f"Re: [SUP-{task.id}] {task.name} - {project.name} - Contract Termination"
-
-    db.add(Email(
-        task_id=task.id,
-        contractor_id=outgoing.id,
-        direction="inbound",
-        subject=fired_subject,
-        body=fired_body,
-        from_email=outgoing.email,
-    ))
-    db.commit()
-
-    # Step 7: AI processes the fired contractor's reply
-    run_agent("reply_processor", (
-        f"Process this inbound email from a terminated contractor:\n"
-        f"From: {outgoing.email}\n"
-        f"Subject: {fired_subject}\n"
-        f"Body:\n{fired_body}\n\n"
-        f"This is regarding task ID {task.id} ({task.name}) in project ID {project.id}. "
-        f"IMPORTANT: This contractor has been terminated from this task. "
-        f"Respond professionally and appropriately to whatever tone they take."
-    ))
-
-    # Step 8: Mark flow complete
-    _advance(flow_id, "complete")
-
-    # Step 9: Generate executive summary
-    summary = run_agent("termination_summarizer", f"Generate an executive summary for termination flow ID {flow_id}.")
+    # Find the flow that was created
+    flow = db.query(TerminationFlow).filter(
+        TerminationFlow.task_id == task.id,
+        TerminationFlow.outgoing_contractor_id == outgoing.id,
+        TerminationFlow.status == "pending_approval",
+    ).order_by(TerminationFlow.created_at.desc()).first()
 
     return {
-        "flow_id": flow_id,
+        "flow_id": flow.id if flow else None,
         "task_name": task.name,
         "outgoing_contractor": outgoing.name,
-        "incoming_contractor": incoming.name,
-        "fired_reply_preview": fired_body[:120] + "...",
-        "summary_preview": summary[:300] + "..." if len(summary) > 300 else summary,
+        "message": "Termination recommendation created. Review the alert above and click Approve to proceed.",
+        "summary": result,
     }

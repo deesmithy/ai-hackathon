@@ -569,17 +569,14 @@
         <script>
         function runDemoTermination(projectId) {
             const done = aiAction(
-                'Running Termination Demo',
-                'Cliff is simulating a full contractor termination workflow.',
+                'Evaluating Termination',
+                'Cliff is analyzing a contractor situation and building a case for termination.',
                 [
-                    'Selecting contractor to terminate...',
-                    'Drafting availability inquiry to replacement...',
-                    'Simulating replacement confirmation...',
-                    'Sending termination notice to fired contractor...',
-                    'Confirming new contract with replacement...',
-                    'Simulating fired contractor reply...',
-                    'Processing reply and responding...',
-                    'Generating executive summary...'
+                    'Setting up scenario — contractor ghosted after committing...',
+                    'Reviewing project context and email history...',
+                    'Evaluating contractor performance...',
+                    'Identifying best replacement candidate...',
+                    'Building termination recommendation...',
                 ]
             );
             return fetch('/api/agent/demo-termination', {
@@ -598,8 +595,8 @@
                         <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
                     </div>
                     <div>
-                        <h3 class="font-semibold text-gray-900">Demo: Simulate Full Termination</h3>
-                        <p class="text-sm text-surface-500 mt-1 max-w-xl">Cliff will select a contractor, fire them for unresponsiveness, find a replacement, simulate the fired contractor replying with a randomized response, and generate an executive summary of how it was handled.</p>
+                        <h3 class="font-semibold text-gray-900">Simulate Ghosting Scenario</h3>
+                        <p class="text-sm text-surface-500 mt-1 max-w-xl">Cliff will detect that a contractor has ghosted after committing, build a case for termination, and create a recommendation for you to review. You approve or dismiss — then use Inject Email to play the replacement contractor and watch the full flow unfold.</p>
                     </div>
                 </div>
                 <button @click="demoLoading=true; runDemoTermination({{ project.id }}).finally(()=>demoLoading=false)"
@@ -607,7 +604,7 @@
                     class="flex-shrink-0 inline-flex items-center space-x-2 bg-red-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-red-700 disabled:opacity-50 shadow-sm transition-all ml-4">
                     <template x-if="demoLoading"><svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
                     <template x-if="!demoLoading"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg></template>
-                    <span x-text="demoLoading ? 'Running...' : 'Run Demo'"></span>
+                    <span x-text="demoLoading ? 'Evaluating...' : 'Simulate Ghosting'"></span>
                 </button>
             </div>
         </div>
