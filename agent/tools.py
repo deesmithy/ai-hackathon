@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 from datetime import datetime, date
+from sqlalchemy import func
 from database import SessionLocal
 from models import Project, Task, Contractor, Email, OutreachQueue, Alert, TerminationFlow
 from services.email_service import send_email_via_gmail
@@ -162,6 +163,19 @@ def send_email(to_email: str, to_name: str, subject: str, body: str,
         if outreach:
             outreach.status = "sent"
             outreach.sent_at = datetime.utcnow()
+        else:
+            # Contractor reached outside the original queue (e.g. bonus outreach after exhaustion)
+            # — create a queue entry so they show up as the active contractor in the UI
+            max_priority = db.query(func.max(OutreachQueue.priority_order)).filter(
+                OutreachQueue.task_id == task_id
+            ).scalar() or 0
+            db.add(OutreachQueue(
+                task_id=task_id,
+                contractor_id=contractor_id,
+                priority_order=max_priority + 1,
+                status="sent",
+                sent_at=datetime.utcnow(),
+            ))
 
         task = db.query(Task).get(task_id)
         if task:
@@ -446,7 +460,6 @@ def advance_termination_flow(flow_id: int, new_status: str) -> dict:
                     incoming_entry.status = "accepted"
                     incoming_entry.responded_at = now
                 else:
-                    from sqlalchemy import func
                     max_priority = db.query(func.max(OutreachQueue.priority_order)).filter(
                         OutreachQueue.task_id == flow.task_id
                     ).scalar() or 0
