@@ -45,6 +45,69 @@ MODE_CONFIG = {
 }
 
 
+def generate_tasks_direct(user_message: str) -> list[dict]:
+    """Generate a task plan in a single Claude API call using forced structured output.
+
+    Instead of the multi-round-trip agent loop, this fetches available specialties
+    from the DB, passes them to Claude, and forces a single `submit_tasks` tool call
+    that returns the full task list as structured JSON.
+    """
+    from agent.tools import get_contractor_roster
+
+    roster = get_contractor_roster()
+    specialties = sorted({c["specialty"] for c in roster})
+
+    submit_tool = {
+        "name": "submit_tasks",
+        "description": "Submit the complete ordered list of construction tasks for this project.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Short task name"},
+                            "description": {"type": "string", "description": "What the task involves"},
+                            "specialty_needed": {
+                                "type": "string",
+                                "enum": specialties,
+                                "description": "Trade required for this task",
+                            },
+                            "estimated_days": {"type": "integer", "description": "Realistic working days"},
+                            "sequence_order": {"type": "integer", "description": "Order this task occurs (1 = first)"},
+                            "depends_on_sequence": {
+                                "type": "integer",
+                                "description": "sequence_order of the task that must finish before this one, or omit if none",
+                            },
+                        },
+                        "required": ["name", "description", "specialty_needed", "estimated_days", "sequence_order"],
+                    },
+                }
+            },
+            "required": ["tasks"],
+        },
+    }
+
+    full_message = user_message + f"\n\nAvailable contractor specialties: {', '.join(specialties)}"
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=4096,
+        system=prompts.PLAN_GENERATOR,
+        tools=[submit_tool],
+        tool_choice={"type": "tool", "name": "submit_tasks"},
+        messages=[{"role": "user", "content": full_message}],
+    )
+
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_tasks":
+            return block.input.get("tasks", [])
+
+    return []
+
+
 def run_agent(mode: str, user_message: str) -> str:
     """Run the Claude agent in a specific mode with an agentic tool-use loop."""
     config = MODE_CONFIG.get(mode)

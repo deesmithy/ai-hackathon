@@ -4,7 +4,7 @@ from datetime import datetime
 from database import get_db
 from models import Project, Email, Task, OutreachQueue, TerminationFlow, Contractor
 from schemas import GeneratePlanRequest, AssignContractorsRequest, RunOutreachRequest, CheckStatusRequest, ProcessReplyRequest, EvaluateTerminationRequest, ApproveTerminationRequest, CancelTerminationRequest, TerminationFlowOut, RegenerateTasksRequest, ReassignContractorsRequest
-from agent.agent import run_agent
+from agent.agent import run_agent, generate_tasks_direct
 from services.contractor_service import get_contractor_by_email
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -54,6 +54,42 @@ def _build_plan_user_msg(project):
     return user_msg
 
 
+def _save_tasks_from_dicts(db, project_id: int, task_dicts: list[dict]) -> list[dict]:
+    """Bulk-insert tasks from Claude's structured output and resolve depends_on references."""
+    inserted = []
+    for t in task_dicts:
+        task = Task(
+            project_id=project_id,
+            name=t["name"],
+            description=t.get("description"),
+            specialty_needed=t.get("specialty_needed"),
+            estimated_days=t.get("estimated_days"),
+            sequence_order=t.get("sequence_order", 0),
+        )
+        db.add(task)
+        db.flush()  # populate task.id before second pass
+        inserted.append((task, t.get("depends_on_sequence")))
+
+    # Second pass: resolve depends_on_sequence → actual task ID
+    seq_to_id = {task.sequence_order: task.id for task, _ in inserted}
+    for task, dep_seq in inserted:
+        if dep_seq and dep_seq in seq_to_id:
+            task.depends_on_task = seq_to_id[dep_seq]
+
+    db.commit()
+    return [
+        {
+            "id": task.id,
+            "name": task.name,
+            "description": task.description,
+            "specialty_needed": task.specialty_needed,
+            "estimated_days": task.estimated_days,
+            "sequence_order": task.sequence_order,
+        }
+        for task, _ in inserted
+    ]
+
+
 @router.post("/generate-plan")
 def generate_plan(data: GeneratePlanRequest, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == data.project_id).first()
@@ -61,20 +97,8 @@ def generate_plan(data: GeneratePlanRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
 
     user_msg = _build_plan_user_msg(project)
-    run_agent("plan_generator", user_msg)
-
-    tasks = db.query(Task).filter(Task.project_id == project.id).order_by(Task.sequence_order).all()
-    task_list = [
-        {
-            "id": t.id,
-            "name": t.name,
-            "description": t.description,
-            "specialty_needed": t.specialty_needed,
-            "estimated_days": t.estimated_days,
-            "sequence_order": t.sequence_order,
-        }
-        for t in tasks
-    ]
+    task_dicts = generate_tasks_direct(user_msg)
+    task_list = _save_tasks_from_dicts(db, project.id, task_dicts)
     return {"project_id": project.id, "tasks": task_list}
 
 
@@ -85,27 +109,15 @@ def regenerate_tasks(data: RegenerateTasksRequest, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Delete existing tasks (cascade deletes outreach queue entries)
-    tasks = db.query(Task).filter(Task.project_id == project.id).all()
-    for t in tasks:
+    existing = db.query(Task).filter(Task.project_id == project.id).all()
+    for t in existing:
         db.delete(t)
     db.commit()
 
     user_msg = _build_plan_user_msg(project)
     user_msg += f"\nUser feedback: {data.feedback}\nPlease revise accordingly."
-    run_agent("plan_generator", user_msg)
-
-    tasks = db.query(Task).filter(Task.project_id == project.id).order_by(Task.sequence_order).all()
-    task_list = [
-        {
-            "id": t.id,
-            "name": t.name,
-            "description": t.description,
-            "specialty_needed": t.specialty_needed,
-            "estimated_days": t.estimated_days,
-            "sequence_order": t.sequence_order,
-        }
-        for t in tasks
-    ]
+    task_dicts = generate_tasks_direct(user_msg)
+    task_list = _save_tasks_from_dicts(db, project.id, task_dicts)
     return {"project_id": project.id, "tasks": task_list}
 
 
