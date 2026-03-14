@@ -22,6 +22,8 @@ def send_email_via_gmail(to_email: str, to_name: str, subject: str, body: str) -
         return "stub-no-gmail-creds"
 
     # Sanitize non-breaking spaces and other unicode whitespace that Claude may produce
+    to_email = to_email.replace("\xa0", "").strip()
+    to_name = to_name.replace("\xa0", " ").strip()
     subject = subject.replace("\xa0", " ")
     body = body.replace("\xa0", " ")
 

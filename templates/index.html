@@ -1,55 +1,119 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — Superintendent AI{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
-    <a href="/projects/new" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700">+ New Project</a>
+
+<!-- Page Header -->
+<div class="flex items-center justify-between mb-8">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Projects</h1>
+        <p class="text-sm text-surface-500 mt-1">Manage and track your construction projects</p>
+    </div>
+    <a href="/projects/new" class="inline-flex items-center space-x-2 bg-brand-600 text-white pl-4 pr-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition-all">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        <span>New Project</span>
+    </a>
 </div>
 
+<!-- Stats Row -->
+{% if projects %}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+    {% set active_count = projects | selectattr('status', 'equalto', 'active') | list | length %}
+    {% set planning_count = projects | selectattr('status', 'equalto', 'planning') | list | length %}
+    {% set at_risk_count = projects | selectattr('status', 'in', ['behind', 'at_risk']) | list | length %}
+    {% set complete_count = projects | selectattr('status', 'equalto', 'complete') | list | length %}
+    <div class="bg-white rounded-xl border border-surface-200 p-4">
+        <div class="text-xs font-medium text-surface-400 uppercase tracking-wider">Total</div>
+        <div class="text-2xl font-bold text-gray-900 mt-1">{{ projects | length }}</div>
+    </div>
+    <div class="bg-white rounded-xl border border-surface-200 p-4">
+        <div class="text-xs font-medium text-emerald-600 uppercase tracking-wider">Active</div>
+        <div class="text-2xl font-bold text-gray-900 mt-1">{{ active_count }}</div>
+    </div>
+    <div class="bg-white rounded-xl border border-surface-200 p-4">
+        <div class="text-xs font-medium text-brand-600 uppercase tracking-wider">Planning</div>
+        <div class="text-2xl font-bold text-gray-900 mt-1">{{ planning_count }}</div>
+    </div>
+    <div class="bg-white rounded-xl border border-surface-200 p-4">
+        <div class="text-xs font-medium {{ 'text-red-500' if at_risk_count > 0 else 'text-surface-400' }} uppercase tracking-wider">At Risk</div>
+        <div class="text-2xl font-bold {{ 'text-red-600' if at_risk_count > 0 else 'text-gray-900' }} mt-1">{{ at_risk_count }}</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Alerts -->
 {% if alerts %}
-<div class="mb-6 space-y-2">
+<div class="mb-8 space-y-3">
     {% for alert in alerts %}
-    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-        <div class="flex items-center">
-            <span class="text-yellow-600 font-medium text-sm mr-2">{{ alert.alert_type | upper }}</span>
-            <span class="text-gray-700 text-sm">{{ alert.message }}</span>
-            <span class="ml-auto text-xs text-gray-400">{{ alert.created_at.strftime('%b %d %H:%M') }}</span>
+    <div class="flex items-start space-x-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center mt-0.5">
+            <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
         </div>
+        <div class="flex-1 min-w-0">
+            <span class="text-sm font-semibold text-amber-800">{{ alert.alert_type | replace('_', ' ') | title }}</span>
+            <p class="text-sm text-amber-700 mt-0.5">{{ alert.message }}</p>
+        </div>
+        <span class="text-xs text-amber-500 whitespace-nowrap">{{ alert.created_at.strftime('%b %d %H:%M') }}</span>
     </div>
     {% endfor %}
 </div>
 {% endif %}
 
+<!-- Project Cards -->
 {% if projects %}
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
     {% for project in projects %}
-    <a href="/projects/{{ project.id }}" class="block bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition">
-        <div class="flex items-center justify-between mb-3">
-            <h2 class="font-semibold text-gray-900 truncate">{{ project.name }}</h2>
-            {% set badge_colors = {
-                'planning': 'bg-gray-100 text-gray-700',
-                'active': 'bg-green-100 text-green-700',
-                'behind': 'bg-red-100 text-red-700',
-                'at_risk': 'bg-yellow-100 text-yellow-700',
-                'complete': 'bg-blue-100 text-blue-700'
-            } %}
-            <span class="text-xs font-medium px-2.5 py-0.5 rounded-full {{ badge_colors.get(project.status, 'bg-gray-100 text-gray-700') }}">
-                {{ project.status | replace('_', ' ') | title }}
-            </span>
-        </div>
-        <p class="text-sm text-gray-500 line-clamp-2 mb-4">{{ project.description[:120] }}{% if project.description|length > 120 %}...{% endif %}</p>
-        <div class="flex items-center text-xs text-gray-400 space-x-4">
-            <span>{{ project.task_count }} tasks</span>
-            {% if project.start_date %}<span>Start: {{ project.start_date }}</span>{% endif %}
-            {% if project.target_end_date %}<span>Due: {{ project.target_end_date }}</span>{% endif %}
+    {% set badge_styles = {
+        'planning': 'bg-surface-100 text-surface-500 ring-surface-200',
+        'active': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+        'behind': 'bg-red-50 text-red-700 ring-red-200',
+        'at_risk': 'bg-amber-50 text-amber-700 ring-amber-200',
+        'complete': 'bg-sky-50 text-sky-700 ring-sky-200'
+    } %}
+    <a href="/projects/{{ project.id }}" class="group block bg-white rounded-xl border border-surface-200 card-hover overflow-hidden">
+        <!-- Color accent bar -->
+        {% set bar_colors = {'planning':'bg-surface-300','active':'bg-emerald-500','behind':'bg-red-500','at_risk':'bg-amber-500','complete':'bg-sky-500'} %}
+        <div class="h-1 {{ bar_colors.get(project.status, 'bg-surface-300') }}"></div>
+        <div class="p-5">
+            <div class="flex items-start justify-between mb-3">
+                <h2 class="font-semibold text-gray-900 truncate group-hover:text-brand-700 transition-colors">{{ project.name }}</h2>
+                <span class="flex-shrink-0 ml-3 text-xs font-medium px-2.5 py-1 rounded-lg ring-1 ring-inset {{ badge_styles.get(project.status, 'bg-surface-100 text-surface-500 ring-surface-200') }}">
+                    {{ project.status | replace('_', ' ') | title }}
+                </span>
+            </div>
+            <p class="text-sm text-surface-500 line-clamp-2 mb-4 leading-relaxed">{{ project.description[:120] }}{% if project.description|length > 120 %}...{% endif %}</p>
+            <div class="flex items-center justify-between pt-3 border-t border-surface-100">
+                <div class="flex items-center text-xs text-surface-400 space-x-3">
+                    <span class="flex items-center space-x-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h.75"/></svg>
+                        <span>{{ project.task_count }} tasks</span>
+                    </span>
+                    {% if project.target_end_date %}
+                    <span class="flex items-center space-x-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+                        <span>Due {{ project.target_end_date }}</span>
+                    </span>
+                    {% endif %}
+                </div>
+                <svg class="w-4 h-4 text-surface-300 group-hover:text-brand-500 transition-colors" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+            </div>
         </div>
     </a>
     {% endfor %}
 </div>
 {% else %}
-<div class="text-center py-16 text-gray-400">
-    <p class="text-lg mb-2">No projects yet</p>
-    <a href="/projects/new" class="text-indigo-600 hover:underline">Create your first project</a>
+<!-- Empty State -->
+<div class="text-center py-20">
+    <div class="w-20 h-20 rounded-2xl bg-surface-100 flex items-center justify-center mx-auto mb-6">
+        <svg class="w-10 h-10 text-surface-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 4.5h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z"/>
+        </svg>
+    </div>
+    <h2 class="text-lg font-semibold text-gray-900 mb-2">No projects yet</h2>
+    <p class="text-sm text-surface-400 mb-6 max-w-sm mx-auto">Create your first project and let the AI plan out your construction tasks automatically.</p>
+    <a href="/projects/new" class="inline-flex items-center space-x-2 bg-brand-600 text-white pl-4 pr-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition-all">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        <span>Create First Project</span>
+    </a>
 </div>
 {% endif %}
 {% endblock %}

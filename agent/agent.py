@@ -1,6 +1,7 @@
 """Core Claude agent loop with tool use handling."""
 import os
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import anthropic
 from dotenv import load_dotenv
 from agent.tools import TOOL_DEFINITIONS, TOOL_FUNCTIONS
@@ -66,36 +67,42 @@ def run_agent(mode: str, user_message: str) -> str:
             text_blocks = [b.text for b in response.content if b.type == "text"]
             return "\n".join(text_blocks) if text_blocks else "Agent completed with no response."
 
-        # Process tool calls
+        # Process tool calls in parallel
         messages.append({"role": "assistant", "content": response.content})
 
-        tool_results = []
-        for tool_block in tool_use_blocks:
+        def _execute_tool(tool_block):
             tool_name = tool_block.name
             tool_input = tool_block.input
-
-            if tool_name in TOOL_FUNCTIONS:
-                try:
-                    result = TOOL_FUNCTIONS[tool_name](**tool_input)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_block.id,
-                        "content": json.dumps(result, default=str),
-                    })
-                except Exception as e:
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_block.id,
-                        "content": json.dumps({"error": str(e)}),
-                        "is_error": True,
-                    })
-            else:
-                tool_results.append({
+            if tool_name not in TOOL_FUNCTIONS:
+                return {
                     "type": "tool_result",
                     "tool_use_id": tool_block.id,
                     "content": json.dumps({"error": f"Unknown tool: {tool_name}"}),
                     "is_error": True,
-                })
+                }
+            try:
+                result = TOOL_FUNCTIONS[tool_name](**tool_input)
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_block.id,
+                    "content": json.dumps(result, default=str),
+                }
+            except Exception as e:
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_block.id,
+                    "content": json.dumps({"error": str(e)}),
+                    "is_error": True,
+                }
+
+        with ThreadPoolExecutor(max_workers=len(tool_use_blocks)) as executor:
+            futures = {executor.submit(_execute_tool, tb): tb.id for tb in tool_use_blocks}
+            results_by_id = {}
+            for future in as_completed(futures):
+                result = future.result()
+                results_by_id[result["tool_use_id"]] = result
+            # Preserve original order
+            tool_results = [results_by_id[tb.id] for tb in tool_use_blocks]
 
         messages.append({"role": "user", "content": tool_results})
 

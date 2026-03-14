@@ -14,7 +14,9 @@ def get_contractors_by_specialty(db: Session, specialty: str):
     return (
         db.query(Contractor)
         .filter(Contractor.active == True, Contractor.specialty == specialty)
-        .order_by(Contractor.rating.desc())
+        .order_by(
+            (Contractor.rating_reliability + Contractor.rating_quality).desc()
+        )
         .all()
     )
 

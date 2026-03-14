@@ -9,7 +9,9 @@ class ContractorCreate(BaseModel):
     email: str
     phone: Optional[str] = None
     specialty: str
-    rating: int = 5
+    rating_reliability: int = 3
+    rating_price: int = 3
+    rating_quality: int = 3
 
 class ContractorOut(BaseModel):
     id: int
@@ -17,7 +19,9 @@ class ContractorOut(BaseModel):
     email: str
     phone: Optional[str]
     specialty: str
-    rating: int
+    rating_reliability: int
+    rating_price: int
+    rating_quality: int
     active: bool
     created_at: datetime
     class Config:

@@ -2,126 +2,195 @@
 {% block title %}{{ project.name }} — Superintendent AI{% endblock %}
 {% block content %}
 <div x-data="{ outreachLoading: false, statusLoading: false, outreachDone: false, statusDone: false }">
+
+    <!-- Breadcrumb -->
+    <a href="/" class="inline-flex items-center text-sm text-surface-400 hover:text-brand-600 transition-colors mb-5">
+        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+        All Projects
+    </a>
+
     <!-- Header -->
-    <div class="flex items-center justify-between mb-6">
-        <div>
-            <h1 class="text-2xl font-bold text-gray-900">{{ project.name }}</h1>
-            <p class="text-sm text-gray-500 mt-1">{{ project.description[:200] }}</p>
+    <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center space-x-3 mb-2">
+                <h1 class="text-2xl font-bold text-gray-900 truncate">{{ project.name }}</h1>
+                {% set badge_styles = {
+                    'planning': 'bg-surface-100 text-surface-500 ring-surface-200',
+                    'active': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+                    'behind': 'bg-red-50 text-red-700 ring-red-200',
+                    'at_risk': 'bg-amber-50 text-amber-700 ring-amber-200',
+                    'complete': 'bg-sky-50 text-sky-700 ring-sky-200'
+                } %}
+                <span class="flex-shrink-0 text-xs font-semibold px-3 py-1 rounded-lg ring-1 ring-inset {{ badge_styles.get(project.status, 'bg-surface-100 text-surface-500 ring-surface-200') }}">
+                    {{ project.status | replace('_', ' ') | title }}
+                </span>
+            </div>
+            <p class="text-sm text-surface-500 leading-relaxed">{{ project.description[:200] }}</p>
         </div>
-        <div class="flex items-center space-x-3">
-            {% set badge_colors = {
-                'planning': 'bg-gray-100 text-gray-700',
-                'active': 'bg-green-100 text-green-700',
-                'behind': 'bg-red-100 text-red-700',
-                'at_risk': 'bg-yellow-100 text-yellow-700',
-                'complete': 'bg-blue-100 text-blue-700'
-            } %}
-            <span class="text-sm font-medium px-3 py-1 rounded-full {{ badge_colors.get(project.status, 'bg-gray-100 text-gray-700') }}">
-                {{ project.status | replace('_', ' ') | title }}
-            </span>
+        <div class="flex items-center space-x-3 flex-shrink-0">
+            <button @click="outreachLoading=true; fetch('/api/agent/run-outreach', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:{{ project.id }}})}).then(r=>r.json()).then(()=>{outreachLoading=false;outreachDone=true;setTimeout(()=>location.reload(),1000)}).catch(()=>{outreachLoading=false})"
+                :disabled="outreachLoading"
+                class="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-brand-700 disabled:opacity-50 shadow-sm shadow-brand-600/20 transition-all">
+                <template x-if="outreachLoading"><svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
+                <template x-if="!outreachLoading && !outreachDone"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg></template>
+                <template x-if="outreachDone"><svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4.5 12.75l6 6 9-13.5"/></svg></template>
+                <span x-text="outreachDone ? 'Sent!' : outreachLoading ? 'Sending...' : 'Run Outreach'"></span>
+            </button>
+            <button @click="statusLoading=true; fetch('/api/agent/check-status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:{{ project.id }}})}).then(r=>r.json()).then(()=>{statusLoading=false;statusDone=true;setTimeout(()=>location.reload(),1000)}).catch(()=>{statusLoading=false})"
+                :disabled="statusLoading"
+                class="inline-flex items-center space-x-2 text-surface-500 bg-white px-4 py-2.5 rounded-xl text-sm font-semibold border border-surface-200 hover:border-surface-300 hover:text-gray-700 disabled:opacity-50 transition-all">
+                <template x-if="statusLoading"><svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
+                <template x-if="!statusLoading && !statusDone"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg></template>
+                <template x-if="statusDone"><svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4.5 12.75l6 6 9-13.5"/></svg></template>
+                <span x-text="statusDone ? 'Done!' : statusLoading ? 'Checking...' : 'Check Status'"></span>
+            </button>
         </div>
     </div>
 
-    <!-- Action Buttons -->
-    <div class="flex space-x-3 mb-6">
-        <button @click="outreachLoading=true; fetch('/api/agent/run-outreach', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:{{ project.id }}})}).then(r=>r.json()).then(()=>{outreachLoading=false;outreachDone=true;setTimeout(()=>location.reload(),1000)})"
-            :disabled="outreachLoading"
-            class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center">
-            <template x-if="outreachLoading"><svg class="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
-            <span x-text="outreachDone ? 'Outreach Sent!' : outreachLoading ? 'Sending...' : 'Run Outreach'"></span>
-        </button>
-        <button @click="statusLoading=true; fetch('/api/agent/check-status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:{{ project.id }}})}).then(r=>r.json()).then(()=>{statusLoading=false;statusDone=true;setTimeout(()=>location.reload(),1000)})"
-            :disabled="statusLoading"
-            class="bg-yellow-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-yellow-600 disabled:opacity-50 flex items-center">
-            <template x-if="statusLoading"><svg class="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
-            <span x-text="statusDone ? 'Check Complete!' : statusLoading ? 'Checking...' : 'Check Status'"></span>
-        </button>
+    <!-- Stats Cards -->
+    {% if tasks %}
+    {% set total = tasks|length %}
+    {% set done = tasks | selectattr('status', 'equalto', 'complete') | list | length %}
+    {% set in_prog = tasks | selectattr('status', 'equalto', 'in_progress') | list | length %}
+    {% set blocked = tasks | selectattr('status', 'equalto', 'blocked') | list | length %}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white rounded-xl border border-surface-200 p-4">
+            <div class="text-xs font-medium text-surface-400 uppercase tracking-wider">Total Tasks</div>
+            <div class="text-2xl font-bold text-gray-900 mt-1">{{ total }}</div>
+        </div>
+        <div class="bg-white rounded-xl border border-surface-200 p-4">
+            <div class="text-xs font-medium text-emerald-600 uppercase tracking-wider">Complete</div>
+            <div class="text-2xl font-bold text-gray-900 mt-1">{{ done }}</div>
+        </div>
+        <div class="bg-white rounded-xl border border-surface-200 p-4">
+            <div class="text-xs font-medium text-brand-600 uppercase tracking-wider">In Progress</div>
+            <div class="text-2xl font-bold text-gray-900 mt-1">{{ in_prog }}</div>
+        </div>
+        <div class="bg-white rounded-xl border border-surface-200 p-4">
+            <div class="text-xs font-medium {{ 'text-red-500' if blocked > 0 else 'text-surface-400' }} uppercase tracking-wider">Blocked</div>
+            <div class="text-2xl font-bold {{ 'text-red-600' if blocked > 0 else 'text-gray-900' }} mt-1">{{ blocked }}</div>
+        </div>
     </div>
+
+    <!-- Progress Bar -->
+    <div class="bg-white rounded-xl border border-surface-200 p-4 mb-6">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium text-gray-700">Progress</span>
+            <span class="text-sm font-semibold text-brand-600">{{ ((done / total * 100) | round | int) if total > 0 else 0 }}%</span>
+        </div>
+        <div class="w-full h-2 bg-surface-100 rounded-full overflow-hidden">
+            <div class="h-full bg-gradient-to-r from-brand-500 to-emerald-500 rounded-full transition-all duration-500" style="width: {{ ((done / total * 100) | round | int) if total > 0 else 0 }}%"></div>
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Alerts -->
     {% if alerts %}
-    <div class="mb-6 space-y-2">
+    <div class="mb-6 space-y-3">
         {% for alert in alerts %}
-        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded text-sm">
-            <span class="font-medium text-yellow-700">{{ alert.alert_type | replace('_', ' ') | title }}:</span>
-            <span class="text-gray-700">{{ alert.message }}</span>
+        <div class="flex items-start space-x-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <svg class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+            <div>
+                <span class="text-sm font-semibold text-amber-800">{{ alert.alert_type | replace('_', ' ') | title }}</span>
+                <p class="text-sm text-amber-700 mt-0.5">{{ alert.message }}</p>
+            </div>
         </div>
         {% endfor %}
     </div>
     {% endif %}
 
     <!-- Tasks Table -->
-    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
-        <div class="px-6 py-4 border-b border-gray-200">
-            <h2 class="font-semibold text-gray-900">Tasks ({{ tasks|length }})</h2>
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden mb-8">
+        <div class="px-6 py-4 border-b border-surface-100 flex items-center space-x-3">
+            <div class="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center">
+                <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h.75"/></svg>
+            </div>
+            <h2 class="font-semibold text-gray-900">Tasks <span class="text-surface-400 font-normal">({{ tasks|length }})</span></h2>
         </div>
         {% if tasks %}
-        <table class="w-full text-sm">
-            <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
-                <tr>
-                    <th class="px-6 py-3 text-left">#</th>
-                    <th class="px-6 py-3 text-left">Task</th>
-                    <th class="px-6 py-3 text-left">Specialty</th>
-                    <th class="px-6 py-3 text-left">Status</th>
-                    <th class="px-6 py-3 text-left">Est. Days</th>
-                    <th class="px-6 py-3 text-left">Contractor</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100">
-                {% for task in tasks %}
-                <tr class="hover:bg-gray-50">
-                    <td class="px-6 py-3 text-gray-400">{{ task.sequence_order }}</td>
-                    <td class="px-6 py-3">
-                        <div class="font-medium text-gray-900">{{ task.name }}</div>
-                        {% if task.description %}<div class="text-gray-400 text-xs mt-0.5">{{ task.description[:80] }}</div>{% endif %}
-                    </td>
-                    <td class="px-6 py-3 text-gray-600">{{ task.specialty_needed or '—' }}</td>
-                    <td class="px-6 py-3">
-                        {% set task_badge = {
-                            'pending': 'bg-gray-100 text-gray-600',
-                            'assigned': 'bg-blue-100 text-blue-700',
-                            'outreach_sent': 'bg-purple-100 text-purple-700',
-                            'committed': 'bg-green-100 text-green-700',
-                            'in_progress': 'bg-yellow-100 text-yellow-700',
-                            'complete': 'bg-emerald-100 text-emerald-700',
-                            'blocked': 'bg-red-100 text-red-700',
-                        } %}
-                        <span class="text-xs font-medium px-2 py-0.5 rounded-full {{ task_badge.get(task.status, 'bg-gray-100 text-gray-600') }}">
-                            {{ task.status | replace('_', ' ') | title }}
-                        </span>
-                    </td>
-                    <td class="px-6 py-3 text-gray-600">{{ task.estimated_days or '—' }}</td>
-                    <td class="px-6 py-3 text-gray-600">
-                        {% if task.contractor_name %}{{ task.contractor_name }}{% else %}—{% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-surface-50 text-surface-400 text-xs uppercase tracking-wider">
+                    <tr>
+                        <th class="px-6 py-3 text-left font-medium">#</th>
+                        <th class="px-6 py-3 text-left font-medium">Task</th>
+                        <th class="px-6 py-3 text-left font-medium">Specialty</th>
+                        <th class="px-6 py-3 text-left font-medium">Status</th>
+                        <th class="px-6 py-3 text-left font-medium">Est. Days</th>
+                        <th class="px-6 py-3 text-left font-medium">Contractor</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-surface-100">
+                    {% for task in tasks %}
+                    {% set task_badge = {
+                        'pending': 'bg-surface-100 text-surface-500',
+                        'assigned': 'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200',
+                        'outreach_sent': 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200',
+                        'committed': 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200',
+                        'in_progress': 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
+                        'complete': 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200',
+                        'blocked': 'bg-red-50 text-red-700 ring-1 ring-inset ring-red-200',
+                    } %}
+                    <tr class="hover:bg-surface-50/50 transition-colors">
+                        <td class="px-6 py-3.5 text-surface-400 font-medium">{{ task.sequence_order }}</td>
+                        <td class="px-6 py-3.5">
+                            <div class="font-medium text-gray-900">{{ task.name }}</div>
+                            {% if task.description %}<div class="text-surface-400 text-xs mt-0.5 leading-relaxed">{{ task.description[:80] }}</div>{% endif %}
+                        </td>
+                        <td class="px-6 py-3.5 text-surface-500">{{ task.specialty_needed or '—' }}</td>
+                        <td class="px-6 py-3.5">
+                            <span class="text-xs font-medium px-2.5 py-1 rounded-lg {{ task_badge.get(task.status, 'bg-surface-100 text-surface-500') }}">
+                                {{ task.status | replace('_', ' ') | title }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-3.5 text-surface-500">{{ task.estimated_days or '—' }}</td>
+                        <td class="px-6 py-3.5">
+                            {% if task.contractor_name %}
+                            <div class="flex items-center space-x-2">
+                                <div class="w-6 h-6 rounded-full bg-brand-100 flex items-center justify-center">
+                                    <span class="text-xs font-semibold text-brand-700">{{ task.contractor_name[0] | upper }}</span>
+                                </div>
+                                <span class="text-gray-700">{{ task.contractor_name }}</span>
+                            </div>
+                            {% else %}<span class="text-surface-300">—</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
         {% else %}
-        <div class="px-6 py-8 text-center text-gray-400">No tasks yet</div>
+        <div class="px-6 py-12 text-center">
+            <div class="w-12 h-12 rounded-xl bg-surface-100 flex items-center justify-center mx-auto mb-3">
+                <svg class="w-6 h-6 text-surface-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h.75"/></svg>
+            </div>
+            <p class="text-sm text-surface-400">No tasks yet. Generate a plan to get started.</p>
+        </div>
         {% endif %}
     </div>
 
-    <!-- Email Threads -->
+    <!-- Email History -->
     {% if emails %}
-    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200">
+    <div class="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-surface-100 flex items-center space-x-3">
+            <div class="w-8 h-8 rounded-lg bg-sky-50 flex items-center justify-center">
+                <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+            </div>
             <h2 class="font-semibold text-gray-900">Email History</h2>
         </div>
-        <div class="divide-y divide-gray-100">
+        <div class="divide-y divide-surface-100">
             {% for email in emails %}
-            <div class="px-6 py-4">
-                <div class="flex items-center justify-between mb-1">
-                    <div class="flex items-center space-x-2">
-                        <span class="text-xs font-medium px-2 py-0.5 rounded-full {{ 'bg-blue-100 text-blue-700' if email.direction == 'outbound' else 'bg-green-100 text-green-700' }}">
+            <div class="px-6 py-4 hover:bg-surface-50/50 transition-colors">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xs font-semibold px-2.5 py-1 rounded-lg {{ 'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200' if email.direction == 'outbound' else 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200' }}">
                             {{ email.direction | title }}
                         </span>
                         <span class="text-sm font-medium text-gray-900">{{ email.subject }}</span>
                     </div>
-                    <span class="text-xs text-gray-400">{{ email.created_at.strftime('%b %d %H:%M') }}</span>
+                    <span class="text-xs text-surface-400">{{ email.created_at.strftime('%b %d %H:%M') }}</span>
                 </div>
-                <p class="text-sm text-gray-600 mt-1">{{ email.body[:200] }}{% if email.body|length > 200 %}...{% endif %}</p>
+                <p class="text-sm text-surface-500 leading-relaxed pl-[4.5rem]">{{ email.body[:200] }}{% if email.body|length > 200 %}...{% endif %}</p>
             </div>
             {% endfor %}
         </div>

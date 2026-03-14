@@ -12,7 +12,9 @@ class Contractor(Base):
     email = Column(String, unique=True, nullable=False)
     phone = Column(String, nullable=True)
     specialty = Column(String, nullable=False)
-    rating = Column(Integer, default=5)
+    rating_reliability = Column(Integer, default=3)  # 1-5
+    rating_price = Column(Integer, default=3)        # 1-5 (5 = most affordable)
+    rating_quality = Column(Integer, default=3)      # 1-5
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

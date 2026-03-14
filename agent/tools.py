@@ -68,7 +68,9 @@ def get_contractor_roster(specialty: str | None = None) -> list[dict]:
         query = db.query(Contractor).filter(Contractor.active == True)
         if specialty:
             query = query.filter(Contractor.specialty == specialty)
-        contractors = query.order_by(Contractor.rating.desc()).all()
+        contractors = query.order_by(
+            (Contractor.rating_reliability + Contractor.rating_quality).desc()
+        ).all()
         return [
             {
                 "id": c.id,
@@ -76,7 +78,9 @@ def get_contractor_roster(specialty: str | None = None) -> list[dict]:
                 "email": c.email,
                 "phone": c.phone,
                 "specialty": c.specialty,
-                "rating": c.rating,
+                "rating_reliability": c.rating_reliability,
+                "rating_price": c.rating_price,
+                "rating_quality": c.rating_quality,
             }
             for c in contractors
         ]
@@ -127,7 +131,13 @@ def assign_contractor_to_task(task_id: int, contractor_id: int, priority_order: 
 
 def send_email(to_email: str, to_name: str, subject: str, body: str,
                task_id: int, contractor_id: int) -> dict:
-    """Send an email via Resend and log it."""
+    """Send an email via Gmail SMTP and log it."""
+    # Sanitize any non-breaking spaces Claude may inject
+    to_email = to_email.replace("\xa0", "").strip()
+    to_name = to_name.replace("\xa0", " ").strip()
+    subject = subject.replace("\xa0", " ")
+    body = body.replace("\xa0", " ")
+
     db = SessionLocal()
     try:
         resend_id = send_email_via_gmail(to_email, to_name, subject, body)
