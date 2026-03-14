@@ -786,6 +786,16 @@ def approve_termination(data: ApproveTerminationRequest, db: Session = Depends(g
         raise HTTPException(status_code=400, detail=f"Flow is in status '{flow.status}', expected 'pending_approval'")
 
     flow.superintendent_approved_at = datetime.utcnow()
+
+    # Dismiss the alert now that it's been acted on
+    stale_alerts = db.query(Alert).filter(
+        Alert.task_id == flow.task_id,
+        Alert.alert_type == "termination_recommendation",
+        Alert.is_read == False,
+    ).all()
+    for a in stale_alerts:
+        a.is_read = True
+
     db.commit()
 
     result = run_agent(
@@ -797,6 +807,16 @@ def approve_termination(data: ApproveTerminationRequest, db: Session = Depends(g
     return {"flow_id": flow.id, "status": flow.status, "result": result}
 
 
+@router.post("/dismiss-alert/{alert_id}")
+def dismiss_alert(alert_id: int, db: Session = Depends(get_db)):
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    alert.is_read = True
+    db.commit()
+    return {"id": alert_id, "dismissed": True}
+
+
 @router.post("/cancel-termination")
 def cancel_termination(data: CancelTerminationRequest, db: Session = Depends(get_db)):
     flow = db.query(TerminationFlow).filter(TerminationFlow.id == data.flow_id).first()
@@ -805,6 +825,16 @@ def cancel_termination(data: CancelTerminationRequest, db: Session = Depends(get
 
     flow.status = "cancelled"
     flow.updated_at = datetime.utcnow()
+
+    # Dismiss the associated termination_recommendation alert
+    stale_alerts = db.query(Alert).filter(
+        Alert.task_id == flow.task_id,
+        Alert.alert_type == "termination_recommendation",
+        Alert.is_read == False,
+    ).all()
+    for a in stale_alerts:
+        a.is_read = True
+
     db.commit()
 
     return {"flow_id": flow.id, "status": "cancelled"}
