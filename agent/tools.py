@@ -533,26 +533,53 @@ def mark_outreach_status(task_id: int, contractor_id: int, status: str) -> dict:
 
         task = db.query(Task).get(task_id)
         task_blocked = False
+        other_sent_contractors = []
+
         if task:
             if status == "accepted":
                 task.status = "committed"
+                # Find other contractors who were also sent outreach for this task
+                # — they need to be notified that the role is filled
+                others = db.query(OutreachQueue).filter(
+                    OutreachQueue.task_id == task_id,
+                    OutreachQueue.contractor_id != contractor_id,
+                    OutreachQueue.status == "sent",
+                ).all()
+                for o in others:
+                    c = db.query(Contractor).get(o.contractor_id)
+                    if c:
+                        other_sent_contractors.append({
+                            "contractor_id": c.id,
+                            "contractor_name": c.name,
+                            "contractor_email": c.email,
+                        })
             elif status in ("declined", "no_response"):
                 remaining = db.query(OutreachQueue).filter(
                     OutreachQueue.task_id == task_id,
                     OutreachQueue.status == "pending",
                 ).count()
                 if remaining == 0:
-                    task.status = "blocked"
-                    task_blocked = True
+                    # Check if anyone is still being actively pursued
+                    still_active = db.query(OutreachQueue).filter(
+                        OutreachQueue.task_id == task_id,
+                        OutreachQueue.status == "sent",
+                        OutreachQueue.contractor_id != contractor_id,
+                    ).count()
+                    if still_active == 0:
+                        task.status = "blocked"
+                        task_blocked = True
 
         db.commit()
-        return {
+        result = {
             "updated": True,
             "task_id": task_id,
             "contractor_id": contractor_id,
             "status": status,
             "task_now_blocked": task_blocked,
         }
+        if other_sent_contractors:
+            result["other_contractors_to_notify"] = other_sent_contractors
+        return result
     finally:
         db.close()
 

@@ -71,10 +71,25 @@ def project_live_status(project_id: int, db: Session = Depends(get_db)):
     tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.sequence_order).all()
     result = []
     for t in tasks:
-        outreach = db.query(OutreachQueue).filter(
-            OutreachQueue.task_id == t.id,
-            OutreachQueue.priority_order == 1,
-        ).first()
+        outreach = (
+            db.query(OutreachQueue)
+            .filter(OutreachQueue.task_id == t.id, OutreachQueue.status == "accepted")
+            .first()
+        )
+        if not outreach:
+            outreach = (
+                db.query(OutreachQueue)
+                .filter(OutreachQueue.task_id == t.id, OutreachQueue.status == "sent")
+                .order_by(OutreachQueue.sent_at.desc())
+                .first()
+            )
+        if not outreach:
+            outreach = (
+                db.query(OutreachQueue)
+                .filter(OutreachQueue.task_id == t.id)
+                .order_by(OutreachQueue.priority_order)
+                .first()
+            )
         contractor = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first() if outreach else None
         result.append({
             "id": t.id,

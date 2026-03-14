@@ -139,16 +139,32 @@ def project_detail_page(project_id: int, request: Request, db: Session = Depends
 
     tasks_list = db.query(Task).filter(Task.project_id == project_id).order_by(Task.sequence_order).all()
 
-    # Attach contractor name to each task
+    # Attach contractor name to each task — show the currently active contractor:
+    # accepted > most recently sent outreach > fallback to priority_order 1
     for t in tasks_list:
-        outreach = db.query(OutreachQueue).filter(
-            OutreachQueue.task_id == t.id,
-            OutreachQueue.priority_order == 1
-        ).first()
+        outreach = (
+            db.query(OutreachQueue)
+            .filter(OutreachQueue.task_id == t.id, OutreachQueue.status == "accepted")
+            .first()
+        )
+        if not outreach:
+            outreach = (
+                db.query(OutreachQueue)
+                .filter(OutreachQueue.task_id == t.id, OutreachQueue.status == "sent")
+                .order_by(OutreachQueue.sent_at.desc())
+                .first()
+            )
+        if not outreach:
+            outreach = (
+                db.query(OutreachQueue)
+                .filter(OutreachQueue.task_id == t.id)
+                .order_by(OutreachQueue.priority_order)
+                .first()
+            )
         if outreach:
             contractor = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first()
             t.contractor_name = contractor.name if contractor else None
-            t.outreach_status = outreach.status  # pending / sent / accepted / declined / no_response
+            t.outreach_status = outreach.status
         else:
             t.contractor_name = None
             t.outreach_status = None

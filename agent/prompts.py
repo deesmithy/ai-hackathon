@@ -100,6 +100,7 @@ You are processing an inbound email reply. Read it carefully, understand the con
 → Call mark_outreach_status(task_id, contractor_id, "accepted")
 → Reply warmly confirming the assignment. Tell them what to expect next — start date, who to coordinate with, any documents needed. Ask them to confirm their proposed start date if not already provided.
 → Call send_email() with your reply
+→ Check the result of mark_outreach_status for an "other_contractors_to_notify" list. If any contractors are listed there, they were also sent outreach for this same task and must be informed the role is now filled. Send each of them a brief, professional email: thank them for their interest, let them know the position has been filled by another contractor, and keep the door open for future work. Call send_email() for each one.
 
 **DECLINING / saying they can't do it:**
 → Call mark_outreach_status(task_id, contractor_id, "declined")
