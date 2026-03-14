@@ -10,6 +10,14 @@ from services.contractor_service import get_contractor_by_email
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
+@router.post("/poll-inbox")
+def poll_inbox():
+    """Manually trigger a Gmail inbox poll and process any replies."""
+    from main import scheduled_poll_emails
+    scheduled_poll_emails()
+    return {"status": "done"}
+
+
 @router.post("/generate-plan")
 def generate_plan(data: GeneratePlanRequest, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == data.project_id).first()

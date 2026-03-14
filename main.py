@@ -131,8 +131,10 @@ def project_detail_page(project_id: int, request: Request, db: Session = Depends
         if outreach:
             contractor = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first()
             t.contractor_name = contractor.name if contractor else None
+            t.outreach_status = outreach.status  # pending / sent / accepted / declined / no_response
         else:
             t.contractor_name = None
+            t.outreach_status = None
 
     alerts = db.query(Alert).filter(Alert.project_id == project_id, Alert.is_read == False).order_by(Alert.created_at.desc()).all()
     emails_list = db.query(Email).filter(Email.task_id.in_([t.id for t in tasks_list])).order_by(Email.created_at.desc()).all()

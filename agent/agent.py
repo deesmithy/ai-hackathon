@@ -32,7 +32,7 @@ MODE_CONFIG = {
     },
     "reply_processor": {
         "system": prompts.REPLY_PROCESSOR,
-        "tools": ["get_project_context", "update_task_status", "create_alert", "get_email_threads", "get_termination_flow", "advance_termination_flow"],
+        "tools": ["get_project_context", "update_task_status", "create_alert", "get_email_threads", "send_email", "get_termination_flow", "advance_termination_flow"],
     },
     "termination_advisor": {
         "system": prompts.TERMINATION_ADVISOR,
