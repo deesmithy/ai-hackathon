@@ -31,6 +31,14 @@ def _build_assignment_list(db, project_id):
     return result
 
 
+@router.post("/poll-inbox")
+def poll_inbox():
+    """Manually trigger a Gmail inbox poll and process any replies."""
+    from main import scheduled_poll_emails
+    scheduled_poll_emails()
+    return {"status": "done"}
+
+
 def _build_plan_user_msg(project):
     user_msg = (
         f"Create a construction task plan for project ID {project.id}.\n"

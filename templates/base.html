@@ -28,6 +28,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
         body { font-family: 'Inter', system-ui, sans-serif; }
@@ -42,6 +44,19 @@
         @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
         .shimmer { background: linear-gradient(110deg, #f1f5f9 8%, #e2e8f0 18%, #f1f5f9 33%); background-size: 200% 100%; animation: shimmer 1.5s linear infinite; }
         @keyframes shimmer { to { background-position: -200% 0; } }
+        /* Rendered markdown prose */
+        .ai-prose h2 { font-size: 1rem; font-weight: 700; color: #1e293b; margin: 1.25rem 0 0.5rem; padding-bottom: 0.35rem; border-bottom: 1px solid #e2e8f0; }
+        .ai-prose h3 { font-size: 0.875rem; font-weight: 600; color: #334155; margin: 1rem 0 0.4rem; }
+        .ai-prose p { font-size: 0.8125rem; color: #475569; line-height: 1.6; margin: 0.4rem 0; }
+        .ai-prose ul, .ai-prose ol { font-size: 0.8125rem; color: #475569; padding-left: 1.25rem; margin: 0.4rem 0; }
+        .ai-prose li { margin: 0.15rem 0; line-height: 1.5; }
+        .ai-prose strong { color: #1e293b; }
+        .ai-prose hr { border: none; border-top: 1px solid #e2e8f0; margin: 1rem 0; }
+        .ai-prose table { width: 100%; font-size: 0.8125rem; border-collapse: collapse; margin: 0.75rem 0; }
+        .ai-prose th { text-align: left; font-weight: 600; color: #64748b; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.5rem 0.75rem; border-bottom: 2px solid #e2e8f0; }
+        .ai-prose td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #f1f5f9; color: #475569; }
+        .ai-prose tr:hover td { background: #f8fafc; }
+        .ai-prose code { font-size: 0.75rem; background: #f1f5f9; padding: 0.125rem 0.375rem; border-radius: 0.25rem; color: #b45309; }
     </style>
 </head>
 <body class="bg-surface-50 min-h-screen" x-data="aiModal()" @ai-start.window="open($event.detail)" @ai-done.window="close()">
@@ -96,6 +111,17 @@
                     <a href="/projects/new" class="nav-link text-sm font-medium {{ 'text-brand-700 active' if current_path == '/projects/new' else 'text-surface-500 hover:text-gray-900' }}">New Project</a>
                     <a href="/contractors" class="nav-link text-sm font-medium {{ 'text-brand-700 active' if current_path == '/contractors' else 'text-surface-500 hover:text-gray-900' }}">Contractors</a>
                     <a href="/emails" class="nav-link text-sm font-medium {{ 'text-brand-700 active' if current_path == '/emails' else 'text-surface-500 hover:text-gray-900' }}">Emails</a>
+                    <div x-data="{ polling: false, done: false }">
+                        <button @click="polling=true; done=false; fetch('/api/agent/poll-inbox', {method:'POST'}).then(()=>{polling=false; done=true; setTimeout(()=>done=false, 3000)})"
+                            :disabled="polling"
+                            class="inline-flex items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all"
+                            :class="done ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-surface-200 bg-white text-surface-500 hover:border-surface-300 hover:text-gray-700 disabled:opacity-50'">
+                            <template x-if="polling"><svg class="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
+                            <template x-if="!polling && done"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4.5 12.75l6 6 9-13.5"/></svg></template>
+                            <template x-if="!polling && !done"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg></template>
+                            <span x-text="polling ? 'Checking...' : done ? 'Done!' : 'Check Inbox'"></span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -131,18 +131,55 @@ def project_detail_page(project_id: int, request: Request, db: Session = Depends
         if outreach:
             contractor = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first()
             t.contractor_name = contractor.name if contractor else None
+            t.outreach_status = outreach.status  # pending / sent / accepted / declined / no_response
         else:
             t.contractor_name = None
+            t.outreach_status = None
 
     alerts = db.query(Alert).filter(Alert.project_id == project_id, Alert.is_read == False).order_by(Alert.created_at.desc()).all()
-    emails_list = db.query(Email).filter(Email.task_id.in_([t.id for t in tasks_list])).order_by(Email.created_at.desc()).all()
+
+    # Build email threads grouped by task → contractor
+    task_ids = [t.id for t in tasks_list]
+    all_emails = db.query(Email).filter(Email.task_id.in_(task_ids)).order_by(Email.created_at).all()
+
+    threads = {}  # key: (task_id, contractor_id)
+    for e in all_emails:
+        key = (e.task_id, e.contractor_id)
+        if key not in threads:
+            task = next((t for t in tasks_list if t.id == e.task_id), None)
+            contractor = db.query(Contractor).filter(Contractor.id == e.contractor_id).first() if e.contractor_id else None
+            threads[key] = {
+                "task_id": e.task_id,
+                "task_name": task.name if task else "Unknown Task",
+                "contractor_name": contractor.name if contractor else "Unknown",
+                "contractor_email": contractor.email if contractor else "",
+                "emails": [],
+            }
+        threads[key]["emails"].append(e)
+
+    email_threads = sorted(threads.values(), key=lambda t: t["emails"][-1].created_at, reverse=True)
 
     return templates.TemplateResponse("project_detail.html", {
         "request": request,
         "project": project,
         "tasks": tasks_list,
         "alerts": alerts,
-        "emails": emails_list,
+        "email_threads": email_threads,
+    })
+
+
+@app.get("/progress/{project_id}", response_class=HTMLResponse)
+def buyer_progress_page(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return HTMLResponse("<h1>Not Found</h1>", status_code=404)
+
+    tasks_list = db.query(Task).filter(Task.project_id == project_id).order_by(Task.sequence_order).all()
+
+    return templates.TemplateResponse("buyer_progress.html", {
+        "request": request,
+        "project": project,
+        "tasks": tasks_list,
     })
 
 
@@ -154,8 +191,41 @@ def contractors_page(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/emails", response_class=HTMLResponse)
 def emails_page(request: Request, db: Session = Depends(get_db)):
-    emails_list = db.query(Email).order_by(Email.created_at.desc()).all()
-    return templates.TemplateResponse("email_log.html", {"request": request, "emails": emails_list})
+    all_emails = db.query(Email).order_by(Email.created_at).all()
+
+    # Build threads grouped by task → contractor
+    threads = {}
+    for e in all_emails:
+        key = (e.task_id, e.contractor_id)
+        if key not in threads:
+            task = db.query(Task).filter(Task.id == e.task_id).first() if e.task_id else None
+            contractor = db.query(Contractor).filter(Contractor.id == e.contractor_id).first() if e.contractor_id else None
+            project = db.query(Project).filter(Project.id == task.project_id).first() if task else None
+            threads[key] = {
+                "task_id": e.task_id,
+                "task_name": task.name if task else "General",
+                "contractor_name": contractor.name if contractor else "Unknown",
+                "contractor_email": contractor.email if contractor else "",
+                "project_name": project.name if project else "",
+                "project_id": project.id if project else None,
+                "emails": [],
+            }
+        threads[key]["emails"].append(e)
+
+    email_threads = sorted(threads.values(), key=lambda t: t["emails"][-1].created_at, reverse=True)
+
+    # Flat list stats
+    total = len(all_emails)
+    outbound = sum(1 for e in all_emails if e.direction == "outbound")
+    inbound = total - outbound
+
+    return templates.TemplateResponse("email_log.html", {
+        "request": request,
+        "email_threads": email_threads,
+        "total": total,
+        "outbound": outbound,
+        "inbound": inbound,
+    })
 
 
 if __name__ == "__main__":

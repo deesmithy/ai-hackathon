@@ -30,7 +30,7 @@ def send_email_via_gmail(to_email: str, to_name: str, subject: str, body: str) -
 
     msg = MIMEText(body, _charset="utf-8")
     msg["Subject"] = subject
-    msg["From"] = f"Superintendent AI <{gmail_user}>"
+    msg["From"] = f"Cliff <{gmail_user}>"
     msg["To"] = f"{to_name} <{to_email}>"
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
@@ -78,6 +78,11 @@ def poll_gmail_inbox() -> list[dict]:
             # Extract just the email address
             email_match = re.search(r"<(.+?)>", from_addr)
             from_email_addr = email_match.group(1) if email_match else from_addr
+
+            # Skip emails sent by ourselves (prevent self-processing loops)
+            if from_email_addr.lower() == gmail_user.lower():
+                mail.store(num, "+FLAGS", "\\Seen")
+                continue
 
             # Extract body
             body = ""
