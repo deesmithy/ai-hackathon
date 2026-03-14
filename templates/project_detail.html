@@ -460,7 +460,25 @@
     </div> <!-- end Tasks & Schedule tab -->
 
     <!-- ===== EMAILS TAB ===== -->
-    <div x-show="activeTab==='emails'">
+    <div x-show="activeTab==='emails'" x-data="{ checking: false, checkError: '' }">
+
+    <!-- Refresh bar -->
+    <div class="flex items-center justify-between mb-4">
+        <p class="text-xs text-surface-400">Replies are checked automatically every few minutes.</p>
+        <button @click="
+            checking = true; checkError = '';
+            fetch('/api/agent/poll-inbox', { method: 'POST' })
+                .then(r => r.json())
+                .then(() => window.location.reload())
+                .catch(e => { checkError = 'Check failed'; checking = false; })
+        " :disabled="checking"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-surface-200 bg-white text-gray-700 hover:bg-surface-50 hover:border-surface-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+            <svg class="w-3.5 h-3.5" :class="checking && 'animate-spin'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+            <span x-text="checking ? 'Checking...' : 'Check for Replies'"></span>
+        </button>
+    </div>
+    <p x-show="checkError" class="text-xs text-red-500 mb-3" x-text="checkError"></p>
+
     {% if email_threads %}
     <div class="space-y-4">
         {% for thread in email_threads %}
