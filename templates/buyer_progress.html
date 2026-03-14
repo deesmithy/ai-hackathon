@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ project.name }} — Progress</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                colors: {
+                    brand: {
+                        50: '#fdf8f0', 100: '#faebd7', 200: '#f4d5a8',
+                        300: '#edb96e', 400: '#e6993a', 500: '#d97706',
+                        600: '#b45309', 700: '#92400e', 800: '#78350f', 900: '#451a03',
+                    },
+                    surface: {
+                        50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0',
+                        300: '#cbd5e1', 400: '#94a3b8', 500: '#64748b',
+                    }
+                }
+            }
+        }
+    }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        .progress-ring { transition: stroke-dashoffset 1s ease-out; }
+    </style>
+</head>
+<body class="bg-surface-50 min-h-screen">
+    <!-- Header -->
+    <div class="bg-white border-b border-surface-200">
+        <div class="max-w-4xl mx-auto px-6 py-8">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-orange-500 flex items-center justify-center shadow-sm">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M2 21h20M3 7v14M21 7v14M7 3h10l1 4H6l1-4zM7 11h2v3H7zM11 11h2v3h-2zM15 11h2v3h-2zM7 17h2v4H7zM15 17h2v4h-2z"/>
+                    </svg>
+                </div>
+                <span class="text-sm font-semibold text-surface-400">Superintendent.ai</span>
+            </div>
+            <h1 class="text-3xl font-bold text-gray-900 mb-2">{{ project.name }}</h1>
+            <p class="text-surface-500 leading-relaxed max-w-2xl">{{ project.description }}</p>
+            {% if project.start_date or project.target_end_date %}
+            <div class="flex items-center space-x-4 mt-4 text-sm text-surface-500">
+                {% if project.start_date %}
+                <div class="flex items-center space-x-1.5">
+                    <svg class="w-4 h-4 text-surface-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25"/></svg>
+                    <span>Started {{ project.start_date.strftime('%b %d, %Y') }}</span>
+                </div>
+                {% endif %}
+                {% if project.target_end_date %}
+                <div class="flex items-center space-x-1.5">
+                    <svg class="w-4 h-4 text-surface-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5"/></svg>
+                    <span>Target completion {{ project.target_end_date.strftime('%b %d, %Y') }}</span>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="max-w-4xl mx-auto px-6 py-8 fade-in">
+        <!-- Progress Overview -->
+        {% if tasks %}
+        {% set total = tasks|length %}
+        {% set done = tasks | selectattr('status', 'equalto', 'complete') | list | length %}
+        {% set in_prog = tasks | selectattr('status', 'equalto', 'in_progress') | list | length %}
+        {% set pct = ((done / total * 100) | round | int) if total > 0 else 0 %}
+
+        <div class="bg-white rounded-2xl border border-surface-200 p-8 mb-8">
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h2 class="text-lg font-bold text-gray-900">Overall Progress</h2>
+                    <p class="text-sm text-surface-500 mt-1">{{ done }} of {{ total }} tasks complete</p>
+                </div>
+                <!-- Circular progress -->
+                <div class="relative w-20 h-20">
+                    <svg class="w-20 h-20 -rotate-90" viewBox="0 0 80 80">
+                        <circle cx="40" cy="40" r="34" fill="none" stroke="#f1f5f9" stroke-width="6"/>
+                        <circle cx="40" cy="40" r="34" fill="none" stroke="url(#progressGrad)" stroke-width="6"
+                                stroke-linecap="round" class="progress-ring"
+                                stroke-dasharray="{{ 2 * 3.14159 * 34 }}"
+                                stroke-dashoffset="{{ 2 * 3.14159 * 34 * (1 - pct / 100) }}"/>
+                    </svg>
+                    <defs>
+                        <linearGradient id="progressGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#d97706"/>
+                            <stop offset="100%" style="stop-color:#10b981"/>
+                        </linearGradient>
+                    </defs>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <span class="text-xl font-bold text-gray-900">{{ pct }}%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="w-full h-3 bg-surface-100 rounded-full overflow-hidden">
+                {% set committed_count = tasks | selectattr('status', 'equalto', 'committed') | list | length %}
+                {% set in_prog_pct = ((in_prog / total * 100) | round | int) if total > 0 else 0 %}
+                {% set committed_pct = ((committed_count / total * 100) | round | int) if total > 0 else 0 %}
+                <div class="h-full flex">
+                    <div class="bg-emerald-500 transition-all duration-700" style="width: {{ pct }}%"></div>
+                    <div class="bg-brand-400 transition-all duration-700" style="width: {{ in_prog_pct }}%"></div>
+                    <div class="bg-sky-300 transition-all duration-700" style="width: {{ committed_pct }}%"></div>
+                </div>
+            </div>
+            <div class="flex items-center gap-6 mt-3 text-xs text-surface-500">
+                <div class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span><span>Complete ({{ done }})</span></div>
+                <div class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-brand-400"></span><span>In Progress ({{ in_prog }})</span></div>
+                <div class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-sky-300"></span><span>Scheduled ({{ committed_count }})</span></div>
+            </div>
+        </div>
+
+        <!-- Task Timeline -->
+        <div class="bg-white rounded-2xl border border-surface-200 overflow-hidden mb-8">
+            <div class="px-6 py-4 border-b border-surface-100">
+                <h2 class="font-semibold text-gray-900">Construction Timeline</h2>
+                <p class="text-xs text-surface-400 mt-0.5">Tasks in order of construction sequence</p>
+            </div>
+            <div class="divide-y divide-surface-100">
+                {% for task in tasks %}
+                {% set step_status = {
+                    'complete': {'icon': 'check', 'ring': 'bg-emerald-500', 'text': 'text-emerald-700', 'bg': 'bg-emerald-50', 'label': 'Complete'},
+                    'in_progress': {'icon': 'progress', 'ring': 'bg-brand-500', 'text': 'text-brand-700', 'bg': 'bg-brand-50', 'label': 'In Progress'},
+                    'committed': {'icon': 'scheduled', 'ring': 'bg-sky-400', 'text': 'text-sky-700', 'bg': 'bg-sky-50', 'label': 'Contractor Confirmed'},
+                    'outreach_sent': {'icon': 'waiting', 'ring': 'bg-violet-400', 'text': 'text-violet-700', 'bg': 'bg-violet-50', 'label': 'Awaiting Confirmation'},
+                    'assigned': {'icon': 'waiting', 'ring': 'bg-surface-300', 'text': 'text-surface-500', 'bg': 'bg-surface-50', 'label': 'Contractor Assigned'},
+                    'blocked': {'icon': 'blocked', 'ring': 'bg-red-400', 'text': 'text-red-700', 'bg': 'bg-red-50', 'label': 'Blocked'},
+                    'pending': {'icon': 'pending', 'ring': 'bg-surface-200', 'text': 'text-surface-400', 'bg': 'bg-surface-50', 'label': 'Upcoming'},
+                } %}
+                {% set s = step_status.get(task.status, step_status.pending) %}
+                <div class="flex items-start px-6 py-4">
+                    <!-- Timeline dot -->
+                    <div class="flex flex-col items-center mr-4 mt-1">
+                        <div class="w-3.5 h-3.5 rounded-full {{ s.ring }} flex-shrink-0 ring-4 ring-white">
+                            {% if task.status == 'complete' %}
+                            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <!-- Content -->
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2.5">
+                                <span class="font-medium text-gray-900">{{ task.name }}</span>
+                                <span class="text-xs font-medium px-2 py-0.5 rounded-lg {{ s.bg }} {{ s.text }}">{{ s.label }}</span>
+                            </div>
+                            {% if task.estimated_days %}
+                            <span class="text-xs text-surface-400 flex-shrink-0">{{ task.estimated_days }} day{{ 's' if task.estimated_days != 1 }}</span>
+                            {% endif %}
+                        </div>
+                        {% if task.description %}
+                        <p class="text-sm text-surface-500 mt-1 leading-relaxed">{{ task.description }}</p>
+                        {% endif %}
+                        {% if task.scheduled_start or task.actual_start %}
+                        <div class="flex items-center space-x-3 mt-2 text-xs text-surface-400">
+                            {% if task.actual_start %}
+                            <span>Started {{ task.actual_start.strftime('%b %d') }}</span>
+                            {% elif task.scheduled_start %}
+                            <span>Scheduled {{ task.scheduled_start.strftime('%b %d') }}{% if task.scheduled_end %} — {{ task.scheduled_end.strftime('%b %d') }}{% endif %}</span>
+                            {% endif %}
+                            {% if task.actual_end %}
+                            <span>Completed {{ task.actual_end.strftime('%b %d') }}</span>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Schedule Calendar (if tasks have dates) -->
+        {% set scheduled_tasks = tasks | selectattr('scheduled_start') | list %}
+        {% if scheduled_tasks %}
+        <div x-data="buyerCalendar()" class="bg-white rounded-2xl border border-surface-200 overflow-hidden mb-8">
+            <div class="px-6 py-4 border-b border-surface-100 flex items-center justify-between">
+                <h2 class="font-semibold text-gray-900">Schedule Calendar</h2>
+                <div class="flex items-center space-x-2">
+                    <button @click="prevMonth()" class="p-1.5 rounded-lg hover:bg-surface-100 text-surface-400 hover:text-gray-700 transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+                    </button>
+                    <span class="text-sm font-semibold text-gray-900 min-w-[140px] text-center" x-text="monthLabel"></span>
+                    <button @click="nextMonth()" class="p-1.5 rounded-lg hover:bg-surface-100 text-surface-400 hover:text-gray-700 transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-7 border-b border-surface-100">
+                <template x-for="day in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']">
+                    <div class="px-2 py-2 text-center text-xs font-medium text-surface-400 uppercase tracking-wider" x-text="day"></div>
+                </template>
+            </div>
+            <div class="grid grid-cols-7">
+                <template x-for="(cell, idx) in cells" :key="idx">
+                    <div class="min-h-[72px] border-b border-r border-surface-100 p-1.5"
+                         :class="{ 'bg-surface-50/50': !cell.inMonth, 'bg-amber-50/30': cell.isToday }">
+                        <div class="text-xs font-medium mb-1"
+                             :class="cell.inMonth ? (cell.isToday ? 'text-brand-600 font-bold' : 'text-gray-700') : 'text-surface-300'"
+                             x-text="cell.day"></div>
+                        <template x-for="task in cell.tasks" :key="task.id">
+                            <div class="text-[10px] leading-tight font-medium px-1.5 py-0.5 rounded mb-0.5 truncate"
+                                 :class="task.color" x-text="task.label"></div>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </div>
+        <script>
+        function buyerCalendar() {
+            const tasks = [
+                {% for t in scheduled_tasks %}
+                { id:{{ t.id }}, name:{{ t.name|tojson }}, start:{{ t.scheduled_start.isoformat()|tojson }}, end:{{ (t.scheduled_end.isoformat() if t.scheduled_end else t.scheduled_start.isoformat())|tojson }}, status:{{ t.status|tojson }} },
+                {% endfor %}
+            ];
+            const colors = {
+                complete: 'bg-emerald-100 text-emerald-700',
+                in_progress: 'bg-brand-100 text-brand-700',
+                default: 'bg-sky-100 text-sky-700',
+            };
+            return {
+                year: new Date().getFullYear(), month: new Date().getMonth(),
+                get monthLabel() { return new Date(this.year, this.month).toLocaleDateString('en-US', {month:'long', year:'numeric'}); },
+                prevMonth() { if(this.month===0){this.month=11;this.year--;}else this.month--; },
+                nextMonth() { if(this.month===11){this.month=0;this.year++;}else this.month++; },
+                get cells() {
+                    const first=new Date(this.year,this.month,1), sd=first.getDay(), dim=new Date(this.year,this.month+1,0).getDate(), pd=new Date(this.year,this.month,0).getDate();
+                    const today=new Date(); today.setHours(0,0,0,0);
+                    const cells=[], toStr=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                    for(let i=sd-1;i>=0;i--){const d=pd-i,m=this.month===0?11:this.month-1,y=this.month===0?this.year-1:this.year;cells.push({day:d,inMonth:false,isToday:false,tasks:this._t(toStr(y,m,d))});}
+                    for(let d=1;d<=dim;d++){const ds=toStr(this.year,this.month,d);cells.push({day:d,inMonth:true,isToday:new Date(this.year,this.month,d).getTime()===today.getTime(),tasks:this._t(ds)});}
+                    const r=42-cells.length,nm=this.month===11?0:this.month+1,ny=this.month===11?this.year+1:this.year;
+                    for(let d=1;d<=r;d++) cells.push({day:d,inMonth:false,isToday:false,tasks:this._t(toStr(ny,nm,d))});
+                    return cells;
+                },
+                _t(ds) {
+                    return tasks.filter(t=>ds>=t.start&&ds<=t.end).map(t=>({
+                        id:t.id, label:t.name,
+                        color: t.status==='complete'?colors.complete:t.status==='in_progress'?colors.in_progress:colors.default,
+                    }));
+                }
+            };
+        }
+        </script>
+        {% endif %}
+        {% endif %}
+
+        <!-- Footer -->
+        <div class="text-center py-6">
+            <p class="text-xs text-surface-400">Powered by <span class="font-semibold">Superintendent.ai</span></p>
+        </div>
+    </div>
+</body>
+</html>

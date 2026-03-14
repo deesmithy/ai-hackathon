@@ -79,6 +79,11 @@ def poll_gmail_inbox() -> list[dict]:
             email_match = re.search(r"<(.+?)>", from_addr)
             from_email_addr = email_match.group(1) if email_match else from_addr
 
+            # Skip emails sent by ourselves (prevent self-processing loops)
+            if from_email_addr.lower() == gmail_user.lower():
+                mail.store(num, "+FLAGS", "\\Seen")
+                continue
+
             # Extract body
             body = ""
             if msg.is_multipart():

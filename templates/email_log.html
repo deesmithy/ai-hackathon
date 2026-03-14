@@ -5,17 +5,15 @@
 <!-- Header -->
 <div class="mb-8">
     <h1 class="text-2xl font-bold text-gray-900">Emails</h1>
-    <p class="text-sm text-surface-500 mt-1">All outbound and inbound email communication</p>
+    <p class="text-sm text-surface-500 mt-1">All email threads across projects</p>
 </div>
 
-{% if emails %}
+{% if email_threads %}
 <!-- Stats -->
-{% set outbound = emails | selectattr('direction', 'equalto', 'outbound') | list | length %}
-{% set inbound = emails | selectattr('direction', 'equalto', 'inbound') | list | length %}
 <div class="grid grid-cols-3 gap-4 mb-8">
     <div class="bg-white rounded-xl border border-surface-200 p-4">
         <div class="text-xs font-medium text-surface-400 uppercase tracking-wider">Total</div>
-        <div class="text-2xl font-bold text-gray-900 mt-1">{{ emails | length }}</div>
+        <div class="text-2xl font-bold text-gray-900 mt-1">{{ total }}</div>
     </div>
     <div class="bg-white rounded-xl border border-surface-200 p-4">
         <div class="text-xs font-medium text-sky-600 uppercase tracking-wider">Sent</div>
@@ -27,41 +25,89 @@
     </div>
 </div>
 
-<!-- Email List -->
-<div class="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
-    <div class="divide-y divide-surface-100">
-        {% for email in emails %}
-        <div class="px-6 py-4 hover:bg-surface-50/50 transition-colors" x-data="{ expanded: false }">
-            <div class="flex items-start space-x-4">
-                <!-- Direction Icon -->
-                <div class="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5 {{ 'bg-sky-50' if email.direction == 'outbound' else 'bg-emerald-50' }}">
-                    {% if email.direction == 'outbound' %}
-                    <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
-                    {% else %}
-                    <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"/></svg>
-                    {% endif %}
+<!-- Thread List -->
+<div class="space-y-4">
+    {% for thread in email_threads %}
+    <div x-data="{ open: false }" class="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
+        <!-- Thread Header -->
+        <button @click="open = !open" class="w-full px-6 py-4 flex items-center justify-between hover:bg-surface-50/50 transition-colors text-left">
+            <div class="flex items-center space-x-3 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-brand-100 flex items-center justify-center flex-shrink-0">
+                    <span class="text-sm font-bold text-brand-700">{{ thread.contractor_name[0] | upper }}</span>
                 </div>
-                <!-- Content -->
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center justify-between mb-1">
-                        <h3 class="text-sm font-semibold text-gray-900 truncate">{{ email.subject }}</h3>
-                        <span class="flex-shrink-0 text-xs text-surface-400 ml-4">{{ email.created_at.strftime('%b %d, %Y %H:%M') }}</span>
+                <div class="min-w-0">
+                    <div class="flex items-center space-x-2 flex-wrap">
+                        <span class="text-sm font-semibold text-gray-900">{{ thread.contractor_name }}</span>
+                        <span class="text-xs text-surface-400">&middot;</span>
+                        <span class="text-xs text-surface-500 truncate">{{ thread.task_name }}</span>
+                        {% if thread.project_name %}
+                        <span class="text-xs text-surface-400">&middot;</span>
+                        {% if thread.project_id %}
+                        <a href="/projects/{{ thread.project_id }}" class="text-xs text-brand-600 hover:text-brand-700 font-medium" @click.stop>{{ thread.project_name }}</a>
+                        {% else %}
+                        <span class="text-xs text-surface-400">{{ thread.project_name }}</span>
+                        {% endif %}
+                        {% endif %}
                     </div>
-                    <div class="flex items-center space-x-3 text-xs text-surface-400 mb-2">
-                        <span class="font-medium px-2 py-0.5 rounded-lg {{ 'bg-sky-50 text-sky-600 ring-1 ring-inset ring-sky-200' if email.direction == 'outbound' else 'bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-200' }}">
-                            {{ email.direction | title }}
-                        </span>
-                        <span>{{ email.to_email if email.direction == 'outbound' else email.from_email }}</span>
+                    <div class="flex items-center space-x-2 mt-0.5">
+                        <span class="text-xs text-surface-400">{{ thread.emails|length }} message{{ 's' if thread.emails|length != 1 }}</span>
+                        {% set in_count = thread.emails | selectattr('direction', 'equalto', 'inbound') | list | length %}
+                        {% if in_count > 0 %}
+                        <span class="text-xs font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600">{{ in_count }} repl{{ 'ies' if in_count != 1 else 'y' }}</span>
+                        {% else %}
+                        <span class="text-xs font-medium px-1.5 py-0.5 rounded bg-surface-100 text-surface-400">awaiting reply</span>
+                        {% endif %}
                     </div>
-                    <p class="text-sm text-surface-500 leading-relaxed cursor-pointer" @click="expanded = !expanded">
-                        <span x-show="!expanded">{{ email.body[:150] }}{% if email.body and email.body|length > 150 %}<span class="text-brand-600 font-medium ml-1">...more</span>{% endif %}</span>
-                        <span x-show="expanded" x-cloak class="whitespace-pre-wrap">{{ email.body }}</span>
-                    </p>
                 </div>
             </div>
+            <div class="flex items-center space-x-3 flex-shrink-0">
+                <span class="text-xs text-surface-400">{{ thread.emails[-1].created_at.strftime('%b %d, %Y %H:%M') }}</span>
+                <svg class="w-4 h-4 text-surface-300 transition-transform" :class="open && 'rotate-180'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+            </div>
+        </button>
+
+        <!-- Thread Messages -->
+        <div x-show="open" x-collapse x-cloak class="border-t border-surface-100">
+            {% for email in thread.emails %}
+            <div class="px-6 py-4 {{ 'bg-surface-50/50' if email.direction == 'inbound' }} {{ 'border-t border-surface-100' if not loop.first }}">
+                <div class="flex items-start space-x-3">
+                    <div class="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center mt-0.5 {{ 'bg-sky-50' if email.direction == 'outbound' else 'bg-emerald-50' }}">
+                        {% if email.direction == 'outbound' %}
+                        <svg class="w-3.5 h-3.5 text-sky-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
+                        {% else %}
+                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"/></svg>
+                        {% endif %}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between mb-1">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm font-medium text-gray-900">{{ 'Superintendent AI' if email.direction == 'outbound' else thread.contractor_name }}</span>
+                                <span class="text-xs font-medium px-2 py-0.5 rounded-lg {{ 'bg-sky-50 text-sky-600 ring-1 ring-inset ring-sky-200' if email.direction == 'outbound' else 'bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-200' }}">
+                                    {{ 'Sent' if email.direction == 'outbound' else 'Reply' }}
+                                </span>
+                            </div>
+                            <span class="text-xs text-surface-400">{{ email.created_at.strftime('%b %d, %H:%M') }}</span>
+                        </div>
+                        {% if email.subject %}
+                        <div class="text-xs font-medium text-surface-400 mb-1">{{ email.subject }}</div>
+                        {% endif %}
+                        <div x-data="{ expanded: false }" class="text-sm text-surface-500 leading-relaxed">
+                            <div x-show="!expanded">
+                                {{ email.body[:250] }}{% if email.body and email.body|length > 250 %}
+                                <button @click="expanded = true" class="text-brand-600 font-medium ml-1 hover:text-brand-700">...show more</button>
+                                {% endif %}
+                            </div>
+                            <div x-show="expanded" x-cloak class="whitespace-pre-wrap">{{ email.body }}
+                                <button @click="expanded = false" class="text-brand-600 font-medium ml-1 hover:text-brand-700 block mt-1">show less</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
         </div>
-        {% endfor %}
     </div>
+    {% endfor %}
 </div>
 {% else %}
 <!-- Empty State -->

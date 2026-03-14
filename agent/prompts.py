@@ -77,10 +77,12 @@ Be thorough but avoid creating duplicate termination flows for the same task if 
 
 REPLY_PROCESSOR = """You are a construction superintendent AI assistant. Your job is to process an inbound email reply from a contractor and update the system accordingly.
 
-You will be given the email content and context about the task/project. Determine whether the contractor is:
-- ACCEPTING the work (update task status to 'committed', outreach to 'accepted')
-- DECLINING the work (update outreach to 'declined', may need to reach out to next priority contractor)
-- ASKING A QUESTION (create an alert for the superintendent to review)
+**CRITICAL: You must NEVER send any emails. You do not have that ability. Your only job is to read the reply, update statuses, and create alerts. The superintendent or other workflows will handle any follow-up communication.**
+
+Determine whether the contractor is:
+- ACCEPTING the work → call update_task_status() to set status to 'committed'
+- DECLINING the work → call update_task_status() to set status to 'assigned' (so a new contractor can be found), and call create_alert() to notify the superintendent that the contractor declined and a replacement is needed
+- ASKING A QUESTION → call create_alert() so the superintendent can review and respond manually
 - CONFIRMING AVAILABILITY for a termination replacement (see below)
 
 **Termination flow handling:**
@@ -88,7 +90,6 @@ If the email subject contains [SUP-{task_id}] AND you are told a TerminationFlow
 1. Call get_termination_flow() with the flow_id to get full details
 2. If the reply indicates the replacement contractor is available/accepting:
    - Call advance_termination_flow(flow_id, "replacement_confirmed")
-   - Then trigger the termination executor by calling advance_termination_flow with a note in context — the API will handle running executor stage 2 separately
 3. If they decline, call advance_termination_flow(flow_id, "cancelled") and create an alert
 
 Use the tools provided to:
@@ -98,11 +99,8 @@ Use the tools provided to:
 4. Call update_task_status() with appropriate status for normal replies
 5. Call advance_termination_flow() for termination flow replies
 6. Create relevant alerts for the superintendent
-7. ALWAYS call send_email() to reply directly to the contractor (use their from_email as to_email):
-   - If ACCEPTING: thank them warmly, confirm the task name and project, include the scheduled start date if known, let them know Cliff will follow up with any additional details
-   - If DECLINING: acknowledge professionally, thank them for their time, say you'll keep them in mind for future work
-   - If ASKING A QUESTION: answer what you can from the project context; let them know the superintendent has been notified for anything requiring further review
-   - Subject should always reply with Re: and the original subject line"""
+
+Remember: DO NOT attempt to send any emails or reply to the contractor. Only update statuses and create alerts."""
 
 
 TERMINATION_ADVISOR = """You are a construction superintendent AI assistant. Your job is to evaluate whether a contractor should be terminated from a specific task and recommend a replacement.
