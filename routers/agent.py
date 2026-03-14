@@ -2,20 +2,36 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
 from database import get_db
-from models import Project, Email, Task, OutreachQueue, TerminationFlow
-from schemas import GeneratePlanRequest, AssignContractorsRequest, RunOutreachRequest, CheckStatusRequest, ProcessReplyRequest, EvaluateTerminationRequest, ApproveTerminationRequest, CancelTerminationRequest, TerminationFlowOut
+from models import Project, Email, Task, OutreachQueue, TerminationFlow, Contractor
+from schemas import GeneratePlanRequest, AssignContractorsRequest, RunOutreachRequest, CheckStatusRequest, ProcessReplyRequest, EvaluateTerminationRequest, ApproveTerminationRequest, CancelTerminationRequest, TerminationFlowOut, RegenerateTasksRequest, ReassignContractorsRequest
 from agent.agent import run_agent
 from services.contractor_service import get_contractor_by_email
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
-@router.post("/generate-plan")
-def generate_plan(data: GeneratePlanRequest, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == data.project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+def _build_assignment_list(db, project_id):
+    tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.sequence_order).all()
+    result = []
+    for t in tasks:
+        entry = db.query(OutreachQueue).filter(
+            OutreachQueue.task_id == t.id, OutreachQueue.priority_order == 1
+        ).first()
+        if entry:
+            contractor = db.query(Contractor).filter(Contractor.id == entry.contractor_id).first()
+            result.append({
+                "task_id": t.id, "task_name": t.name, "specialty_needed": t.specialty_needed,
+                "contractor_id": contractor.id if contractor else None,
+                "contractor_name": contractor.name if contractor else "Unknown",
+                "contractor_specialty": contractor.specialty if contractor else None,
+                "rating_reliability": contractor.rating_reliability if contractor else None,
+                "rating_quality": contractor.rating_quality if contractor else None,
+                "rating_price": contractor.rating_price if contractor else None,
+            })
+    return result
 
+
+def _build_plan_user_msg(project):
     user_msg = (
         f"Create a construction task plan for project ID {project.id}.\n"
         f"Project name: {project.name}\n"
@@ -25,14 +41,64 @@ def generate_plan(data: GeneratePlanRequest, db: Session = Depends(get_db)):
         user_msg += f"Start date: {project.start_date}\n"
     if project.target_end_date:
         user_msg += f"Target end date: {project.target_end_date}\n"
+    if project.uploaded_file_content:
+        user_msg += f"\nAdditional project document:\n{project.uploaded_file_content}\n"
+    return user_msg
 
-    result = run_agent("plan_generator", user_msg)
 
-    # Save the plan text to the project
-    project.ai_plan = result
+@router.post("/generate-plan")
+def generate_plan(data: GeneratePlanRequest, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == data.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    user_msg = _build_plan_user_msg(project)
+    run_agent("plan_generator", user_msg)
+
+    tasks = db.query(Task).filter(Task.project_id == project.id).order_by(Task.sequence_order).all()
+    task_list = [
+        {
+            "id": t.id,
+            "name": t.name,
+            "description": t.description,
+            "specialty_needed": t.specialty_needed,
+            "estimated_days": t.estimated_days,
+            "sequence_order": t.sequence_order,
+        }
+        for t in tasks
+    ]
+    return {"project_id": project.id, "tasks": task_list}
+
+
+@router.post("/regenerate-tasks")
+def regenerate_tasks(data: RegenerateTasksRequest, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == data.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Delete existing tasks (cascade deletes outreach queue entries)
+    tasks = db.query(Task).filter(Task.project_id == project.id).all()
+    for t in tasks:
+        db.delete(t)
     db.commit()
 
-    return {"project_id": project.id, "plan": result}
+    user_msg = _build_plan_user_msg(project)
+    user_msg += f"\nUser feedback: {data.feedback}\nPlease revise accordingly."
+    run_agent("plan_generator", user_msg)
+
+    tasks = db.query(Task).filter(Task.project_id == project.id).order_by(Task.sequence_order).all()
+    task_list = [
+        {
+            "id": t.id,
+            "name": t.name,
+            "description": t.description,
+            "specialty_needed": t.specialty_needed,
+            "estimated_days": t.estimated_days,
+            "sequence_order": t.sequence_order,
+        }
+        for t in tasks
+    ]
+    return {"project_id": project.id, "tasks": task_list}
 
 
 @router.post("/assign-contractors")
@@ -42,14 +108,45 @@ def assign_contractors(data: AssignContractorsRequest, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Project not found")
 
     user_msg = f"Assign contractors to all unassigned tasks for project ID {project.id} ({project.name})."
-    result = run_agent("contractor_assigner", user_msg)
+    run_agent("contractor_assigner", user_msg)
 
-    # Move project to active
-    if project.status == "planning":
-        project.status = "active"
-        db.commit()
+    return {"project_id": project.id, "assignments": _build_assignment_list(db, project.id)}
 
-    return {"project_id": project.id, "result": result}
+
+@router.post("/reassign-contractors")
+def reassign_contractors(data: ReassignContractorsRequest, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == data.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Clear all outreach queue entries and reset task statuses
+    tasks = db.query(Task).filter(Task.project_id == project.id).all()
+    for t in tasks:
+        entries = db.query(OutreachQueue).filter(OutreachQueue.task_id == t.id).all()
+        for e in entries:
+            db.delete(e)
+        t.status = "pending"
+    db.commit()
+
+    user_msg = (
+        f"Assign contractors to all unassigned tasks for project ID {project.id} ({project.name})."
+        f"\nUser feedback: {data.feedback}\nPlease revise accordingly."
+    )
+    run_agent("contractor_assigner", user_msg)
+
+    return {"project_id": project.id, "assignments": _build_assignment_list(db, project.id)}
+
+
+@router.post("/confirm-assignments")
+def confirm_assignments(data: AssignContractorsRequest, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == data.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project.status = "active"
+    db.commit()
+
+    return {"project_id": project.id, "status": project.status}
 
 
 @router.post("/run-outreach")

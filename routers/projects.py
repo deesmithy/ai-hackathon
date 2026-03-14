@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Form, UploadFile, File
 from sqlalchemy.orm import Session
+from typing import Optional
+from datetime import date
 from database import get_db
 from models import Project, Task, Alert
-from schemas import ProjectCreate, ProjectOut
+from schemas import ProjectOut
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -13,8 +15,26 @@ def list_projects(db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=ProjectOut)
-def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
-    project = Project(**data.model_dump())
+async def create_project(
+    name: str = Form(...),
+    description: str = Form(...),
+    start_date: Optional[str] = Form(None),
+    target_end_date: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+):
+    uploaded_file_content = None
+    if file:
+        raw = await file.read()
+        uploaded_file_content = raw.decode("utf-8", errors="ignore")
+
+    project = Project(
+        name=name,
+        description=description,
+        start_date=date.fromisoformat(start_date) if start_date else None,
+        target_end_date=date.fromisoformat(target_end_date) if target_end_date else None,
+        uploaded_file_content=uploaded_file_content,
+    )
     db.add(project)
     db.commit()
     db.refresh(project)

@@ -118,6 +118,14 @@ class AlertOut(BaseModel):
 class GeneratePlanRequest(BaseModel):
     project_id: int
 
+class RegenerateTasksRequest(BaseModel):
+    project_id: int
+    feedback: str
+
+class ReassignContractorsRequest(BaseModel):
+    project_id: int
+    feedback: str
+
 class AssignContractorsRequest(BaseModel):
     project_id: int
 

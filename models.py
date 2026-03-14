@@ -30,6 +30,7 @@ class Project(Base):
     description = Column(Text, nullable=False)
     status = Column(String, default="planning")  # planning / active / behind / at_risk / complete
     ai_plan = Column(Text, nullable=True)
+    uploaded_file_content = Column(Text, nullable=True)
     start_date = Column(Date, nullable=True)
     target_end_date = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
