@@ -42,6 +42,10 @@ MODE_CONFIG = {
         "system": prompts.TERMINATION_EXECUTOR,
         "tools": ["get_termination_flow", "get_project_context", "send_email", "advance_termination_flow"],
     },
+    "termination_summarizer": {
+        "system": prompts.TERMINATION_SUMMARIZER,
+        "tools": ["get_termination_flow", "get_email_threads", "get_project_context", "save_termination_summary"],
+    },
 }
 
 

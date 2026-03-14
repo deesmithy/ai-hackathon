@@ -153,6 +153,9 @@ class ApproveTerminationRequest(BaseModel):
 class CancelTerminationRequest(BaseModel):
     flow_id: int
 
+class DemoTerminationRequest(BaseModel):
+    project_id: int
+
 class TerminationFlowOut(BaseModel):
     id: int
     task_id: int

@@ -353,6 +353,21 @@ def advance_termination_flow(flow_id: int, new_status: str) -> dict:
         db.close()
 
 
+def save_termination_summary(flow_id: int, summary: str) -> dict:
+    """Save an executive summary to a termination flow."""
+    db = SessionLocal()
+    try:
+        flow = db.query(TerminationFlow).get(flow_id)
+        if not flow:
+            return {"error": f"TerminationFlow {flow_id} not found"}
+        flow.summary = summary
+        flow.updated_at = datetime.utcnow()
+        db.commit()
+        return {"flow_id": flow_id, "saved": True}
+    finally:
+        db.close()
+
+
 # Tool definitions for Claude API
 TOOL_DEFINITIONS = [
     {
@@ -515,6 +530,18 @@ TOOL_DEFINITIONS = [
             "required": ["flow_id", "new_status"],
         },
     },
+    {
+        "name": "save_termination_summary",
+        "description": "Save a generated executive summary to a termination flow record.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "flow_id": {"type": "integer"},
+                "summary": {"type": "string", "description": "The full markdown executive summary text"},
+            },
+            "required": ["flow_id", "summary"],
+        },
+    },
 ]
 
 # Map tool names to functions
@@ -531,4 +558,5 @@ TOOL_FUNCTIONS = {
     "create_termination_flow": create_termination_flow,
     "get_termination_flow": get_termination_flow,
     "advance_termination_flow": advance_termination_flow,
+    "save_termination_summary": save_termination_summary,
 }

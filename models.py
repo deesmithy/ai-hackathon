@@ -127,5 +127,6 @@ class TerminationFlow(Base):
     superintendent_approved_at = Column(DateTime, nullable=True)
     replacement_confirmed_at = Column(DateTime, nullable=True)
     termination_sent_at = Column(DateTime, nullable=True)
+    summary = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

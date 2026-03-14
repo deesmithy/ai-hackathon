@@ -159,12 +159,30 @@ def project_detail_page(project_id: int, request: Request, db: Session = Depends
 
     email_threads = sorted(threads.values(), key=lambda t: t["emails"][-1].created_at, reverse=True)
 
+    # Fetch termination flows for this project
+    termination_flows = (
+        db.query(TerminationFlow)
+        .join(Task, Task.id == TerminationFlow.task_id)
+        .filter(Task.project_id == project_id)
+        .order_by(TerminationFlow.created_at.desc())
+        .all()
+    )
+    # Enrich with names
+    for f in termination_flows:
+        t = db.query(Task).get(f.task_id)
+        f.task_name = t.name if t else "Unknown"
+        outgoing = db.query(Contractor).get(f.outgoing_contractor_id)
+        f.outgoing_name = outgoing.name if outgoing else "Unknown"
+        incoming = db.query(Contractor).get(f.incoming_contractor_id)
+        f.incoming_name = incoming.name if incoming else "Unknown"
+
     return templates.TemplateResponse("project_detail.html", {
         "request": request,
         "project": project,
         "tasks": tasks_list,
         "alerts": alerts,
         "email_threads": email_threads,
+        "termination_flows": termination_flows,
     })
 
 
