@@ -353,6 +353,90 @@ def advance_termination_flow(flow_id: int, new_status: str) -> dict:
         db.close()
 
 
+def get_outreach_queue(task_id: int) -> dict:
+    """Get the full outreach queue for a task — all contractors, their priority order, and response status."""
+    db = SessionLocal()
+    try:
+        task = db.query(Task).get(task_id)
+        if not task:
+            return {"error": f"Task {task_id} not found"}
+
+        project = db.query(Project).get(task.project_id) if task else None
+        entries = db.query(OutreachQueue).filter(
+            OutreachQueue.task_id == task_id
+        ).order_by(OutreachQueue.priority_order).all()
+
+        queue = []
+        for e in entries:
+            contractor = db.query(Contractor).get(e.contractor_id)
+            queue.append({
+                "priority_order": e.priority_order,
+                "contractor_id": e.contractor_id,
+                "contractor_name": contractor.name if contractor else "Unknown",
+                "contractor_email": contractor.email if contractor else "",
+                "contractor_specialty": contractor.specialty if contractor else "",
+                "status": e.status,
+                "sent_at": str(e.sent_at) if e.sent_at else None,
+                "responded_at": str(e.responded_at) if e.responded_at else None,
+            })
+
+        next_available = next((e for e in queue if e["status"] == "pending"), None)
+        all_exhausted = bool(queue) and all(e["status"] in ("declined", "no_response") for e in queue)
+
+        return {
+            "task_id": task_id,
+            "task_name": task.name,
+            "task_specialty": task.specialty_needed,
+            "project_id": task.project_id,
+            "project_name": project.name if project else None,
+            "queue": queue,
+            "next_available_contractor": next_available,
+            "all_exhausted": all_exhausted,
+        }
+    finally:
+        db.close()
+
+
+def mark_outreach_status(task_id: int, contractor_id: int, status: str) -> dict:
+    """Mark an outreach queue entry with a new status: accepted, declined, or no_response."""
+    db = SessionLocal()
+    try:
+        entry = db.query(OutreachQueue).filter(
+            OutreachQueue.task_id == task_id,
+            OutreachQueue.contractor_id == contractor_id,
+        ).first()
+        if not entry:
+            return {"error": f"No outreach entry found for task {task_id}, contractor {contractor_id}"}
+
+        entry.status = status
+        entry.responded_at = datetime.utcnow()
+
+        task = db.query(Task).get(task_id)
+        task_blocked = False
+        if task:
+            if status == "accepted":
+                task.status = "committed"
+            elif status in ("declined", "no_response"):
+                remaining = db.query(OutreachQueue).filter(
+                    OutreachQueue.task_id == task_id,
+                    OutreachQueue.status == "pending",
+                ).count()
+                if remaining == 0:
+                    task.status = "blocked"
+                    task_blocked = True
+
+        db.commit()
+        return {
+            "updated": True,
+            "task_id": task_id,
+            "contractor_id": contractor_id,
+            "status": status,
+            "task_now_blocked": task_blocked,
+        }
+    finally:
+        db.close()
+
+
 def save_termination_summary(flow_id: int, summary: str) -> dict:
     """Save an executive summary to a termination flow."""
     db = SessionLocal()
@@ -531,6 +615,30 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "get_outreach_queue",
+        "description": "Get the full outreach queue for a task — all contractors in priority order, their statuses, and who is next available.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "The task ID"}
+            },
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "mark_outreach_status",
+        "description": "Mark an outreach queue entry with a new status. Use 'accepted' when contractor confirms, 'declined' when they say no, 'no_response' when they've gone silent. Automatically sets task to 'blocked' if all contractors in the queue are exhausted.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer"},
+                "contractor_id": {"type": "integer"},
+                "status": {"type": "string", "enum": ["accepted", "declined", "no_response"]},
+            },
+            "required": ["task_id", "contractor_id", "status"],
+        },
+    },
+    {
         "name": "save_termination_summary",
         "description": "Save a generated executive summary to a termination flow record.",
         "input_schema": {
@@ -558,5 +666,7 @@ TOOL_FUNCTIONS = {
     "create_termination_flow": create_termination_flow,
     "get_termination_flow": get_termination_flow,
     "advance_termination_flow": advance_termination_flow,
+    "get_outreach_queue": get_outreach_queue,
+    "mark_outreach_status": mark_outreach_status,
     "save_termination_summary": save_termination_summary,
 }

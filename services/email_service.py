@@ -56,8 +56,8 @@ def poll_gmail_inbox() -> list[dict]:
         mail.login(gmail_user, gmail_pass)
         mail.select("inbox")
 
-        # Search for unread emails with SUP- in subject
-        _, message_numbers = mail.search(None, '(UNSEEN SUBJECT "SUP-")')
+        # Search for all unread emails
+        _, message_numbers = mail.search(None, "UNSEEN")
 
         for num in message_numbers[0].split():
             if not num:

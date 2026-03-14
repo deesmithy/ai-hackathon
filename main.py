@@ -25,15 +25,21 @@ def scheduled_poll_emails():
     from agent.agent import run_agent
     replies = poll_gmail_inbox()
     for reply in replies:
+        msg = (
+            f"Process this inbound email:\n"
+            f"From: {reply['from_email']}\n"
+            f"Subject: {reply['subject']}\n"
+            f"Body:\n{reply['body']}\n\n"
+        )
         if reply.get("task_id"):
-            msg = (
-                f"Process this inbound email reply:\n"
-                f"From: {reply['from_email']}\n"
-                f"Subject: {reply['subject']}\n"
-                f"Body:\n{reply['body']}\n\n"
-                f"This is regarding task ID {reply['task_id']}."
+            msg += f"This is regarding task ID {reply['task_id']}."
+        else:
+            msg += (
+                "No task ID was found in the subject line. Try to determine which project "
+                "or task this relates to based on context clues in the email. If you cannot "
+                "identify it, reply asking for clarification and create an alert for the superintendent."
             )
-            run_agent("reply_processor", msg)
+        run_agent("reply_processor", msg)
 
 
 def scheduled_daily_status_sweep():
