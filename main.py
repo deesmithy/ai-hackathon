@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
 from database import Base, engine, get_db
-from models import Project, Task, Alert, Email, Contractor, OutreachQueue
+from models import Project, Task, Alert, Email, Contractor, OutreachQueue, TerminationFlow
 from seed import seed_contractors
 from services.email_service import poll_gmail_inbox
 
@@ -35,21 +35,36 @@ def scheduled_poll_emails():
             run_agent("reply_processor", msg)
 
 
+def scheduled_daily_status_sweep():
+    """Run status_monitor on every active project once a day."""
+    from agent.agent import run_agent
+    db = next(get_db())
+    try:
+        active_projects = db.query(Project).filter(Project.status.in_(["active", "behind", "at_risk"])).all()
+        for project in active_projects:
+            msg = f"Evaluate the current health of project ID {project.id} ({project.name}) and flag any issues. Recommend terminations if warranted."
+            run_agent("status_monitor", msg)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     Base.metadata.create_all(bind=engine)
     seed_contractors()
 
-    # Start scheduler for Gmail polling
+    # Daily status sweep — runs every morning at 8am regardless of Gmail config
+    scheduler.add_job(scheduled_daily_status_sweep, "cron", hour=8, minute=0, id="daily_status_sweep")
+    scheduler.start()
+    print("Scheduler started: daily status sweep at 8am.")
+
+    # Start Gmail polling if configured
     gmail_user = os.getenv("GMAIL_USER")
     gmail_pass = os.getenv("GMAIL_APP_PASSWORD")
     if gmail_user and gmail_pass and not gmail_pass.startswith("xxxx"):
         scheduler.add_job(scheduled_poll_emails, "interval", minutes=5, id="poll_emails")
-        scheduler.start()
-        print("Scheduler started: polling Gmail every 5 minutes.")
-    else:
-        print("Gmail not configured — email polling disabled.")
+        print("Gmail polling enabled: every 5 minutes.")
 
     yield
 
@@ -61,13 +76,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Superintendent AI", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
+
+def _extract_flow_id(message: str) -> int | None:
+    import re
+    m = re.search(r"Flow ID: (\d+)", message)
+    return int(m.group(1)) if m else None
+
+
+templates.env.filters["extract_flow_id"] = _extract_flow_id
+
 # --- Routers ---
-from routers import projects, tasks, contractors, agent as agent_router
+from routers import projects, tasks, contractors, agent as agent_router, terminations as terminations_router
 
 app.include_router(projects.router)
 app.include_router(tasks.router)
 app.include_router(contractors.router)
 app.include_router(agent_router.router)
+app.include_router(terminations_router.router)
 
 
 # --- UI Pages ---

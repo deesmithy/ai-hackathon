@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from datetime import datetime
 from database import get_db
-from models import Project, Email, Task, OutreachQueue
-from schemas import GeneratePlanRequest, AssignContractorsRequest, RunOutreachRequest, CheckStatusRequest, ProcessReplyRequest
+from models import Project, Email, Task, OutreachQueue, TerminationFlow
+from schemas import GeneratePlanRequest, AssignContractorsRequest, RunOutreachRequest, CheckStatusRequest, ProcessReplyRequest, EvaluateTerminationRequest, ApproveTerminationRequest, CancelTerminationRequest, TerminationFlowOut
 from agent.agent import run_agent
 from services.contractor_service import get_contractor_by_email
 
@@ -108,5 +109,92 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
             db.add(inbound)
             db.commit()
 
+            # Check for an active termination flow for this task
+            term_flow = db.query(TerminationFlow).filter(
+                TerminationFlow.task_id == task_id,
+                TerminationFlow.status == "replacement_outreach_sent",
+            ).first()
+            if term_flow:
+                user_msg += (
+                    f"\nIMPORTANT: A termination flow (ID: {term_flow.id}) is active for this task "
+                    f"in 'replacement_outreach_sent' status. If the contractor is confirming availability, "
+                    f"call advance_termination_flow({term_flow.id}, 'replacement_confirmed')."
+                )
+
     result = run_agent("reply_processor", user_msg)
+
+    # After reply processing, check if a flow was just confirmed → run executor stage 2
+    if task_match:
+        task_id = int(task_match.group(1))
+        confirmed_flow = db.query(TerminationFlow).filter(
+            TerminationFlow.task_id == task_id,
+            TerminationFlow.status == "replacement_confirmed",
+            TerminationFlow.termination_sent_at == None,
+        ).first()
+        if confirmed_flow:
+            run_agent(
+                "termination_executor",
+                f"Execute stage 2: send termination notice and confirm new contract for termination flow ID {confirmed_flow.id}."
+            )
+
     return {"result": result}
+
+
+@router.post("/evaluate-termination")
+def evaluate_termination(data: EvaluateTerminationRequest, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == data.task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    user_msg = (
+        f"Evaluate whether contractor ID {data.contractor_id} should be terminated from "
+        f"task ID {data.task_id} ('{task.name}') in project ID {task.project_id}. "
+        f"Use get_project_context with project_id={task.project_id} and get_email_threads with task_id={data.task_id}. "
+        f"The outgoing contractor ID is {data.contractor_id}."
+    )
+    if data.reason:
+        user_msg += f"\nHint from superintendent: {data.reason}"
+
+    result = run_agent("termination_advisor", user_msg)
+
+    # Try to find the flow that was just created
+    flow = db.query(TerminationFlow).filter(
+        TerminationFlow.task_id == data.task_id,
+        TerminationFlow.outgoing_contractor_id == data.contractor_id,
+        TerminationFlow.status == "pending_approval",
+    ).order_by(TerminationFlow.created_at.desc()).first()
+
+    return {"flow_id": flow.id if flow else None, "summary": result}
+
+
+@router.post("/approve-termination")
+def approve_termination(data: ApproveTerminationRequest, db: Session = Depends(get_db)):
+    flow = db.query(TerminationFlow).filter(TerminationFlow.id == data.flow_id).first()
+    if not flow:
+        raise HTTPException(status_code=404, detail="Termination flow not found")
+    if flow.status != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Flow is in status '{flow.status}', expected 'pending_approval'")
+
+    flow.superintendent_approved_at = datetime.utcnow()
+    db.commit()
+
+    result = run_agent(
+        "termination_executor",
+        f"Execute stage 1: send replacement outreach for termination flow ID {flow.id}."
+    )
+
+    db.refresh(flow)
+    return {"flow_id": flow.id, "status": flow.status, "result": result}
+
+
+@router.post("/cancel-termination")
+def cancel_termination(data: CancelTerminationRequest, db: Session = Depends(get_db)):
+    flow = db.query(TerminationFlow).filter(TerminationFlow.id == data.flow_id).first()
+    if not flow:
+        raise HTTPException(status_code=404, detail="Termination flow not found")
+
+    flow.status = "cancelled"
+    flow.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"flow_id": flow.id, "status": "cancelled"}

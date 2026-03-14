@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, date
 from database import SessionLocal
-from models import Project, Task, Contractor, Email, OutreachQueue, Alert
+from models import Project, Task, Contractor, Email, OutreachQueue, Alert, TerminationFlow
 from services.email_service import send_email_via_gmail
 
 
@@ -249,6 +249,109 @@ def update_project_status(project_id: int, status: str) -> dict:
         db.close()
 
 
+def create_termination_flow(task_id: int, outgoing_contractor_id: int,
+                             incoming_contractor_id: int, reason: str) -> dict:
+    """Create a termination flow and alert for the superintendent to review."""
+    db = SessionLocal()
+    try:
+        task = db.query(Task).get(task_id)
+        if not task:
+            return {"error": f"Task {task_id} not found"}
+
+        flow = TerminationFlow(
+            task_id=task_id,
+            outgoing_contractor_id=outgoing_contractor_id,
+            incoming_contractor_id=incoming_contractor_id,
+            reason=reason,
+            status="pending_approval",
+        )
+        db.add(flow)
+        db.flush()
+
+        outgoing = db.query(Contractor).get(outgoing_contractor_id)
+        incoming = db.query(Contractor).get(incoming_contractor_id)
+
+        alert = Alert(
+            project_id=task.project_id,
+            task_id=task_id,
+            alert_type="termination_recommendation",
+            message=(
+                f"Termination recommended for {outgoing.name if outgoing else 'contractor'} "
+                f"on task '{task.name}'. Proposed replacement: {incoming.name if incoming else 'contractor'}. "
+                f"Reason: {reason} (Flow ID: {flow.id})"
+            ),
+        )
+        db.add(alert)
+        db.commit()
+        db.refresh(flow)
+        return {"flow_id": flow.id, "status": flow.status}
+    finally:
+        db.close()
+
+
+def get_termination_flow(flow_id: int) -> dict:
+    """Get full details of a termination flow."""
+    db = SessionLocal()
+    try:
+        flow = db.query(TerminationFlow).get(flow_id)
+        if not flow:
+            return {"error": f"TerminationFlow {flow_id} not found"}
+
+        task = db.query(Task).get(flow.task_id)
+        project = db.query(Project).get(task.project_id) if task else None
+        outgoing = db.query(Contractor).get(flow.outgoing_contractor_id)
+        incoming = db.query(Contractor).get(flow.incoming_contractor_id)
+
+        return {
+            "id": flow.id,
+            "task_id": flow.task_id,
+            "task_name": task.name if task else None,
+            "project_id": project.id if project else None,
+            "project_name": project.name if project else None,
+            "outgoing_contractor_id": flow.outgoing_contractor_id,
+            "outgoing_contractor_name": outgoing.name if outgoing else None,
+            "outgoing_contractor_email": outgoing.email if outgoing else None,
+            "incoming_contractor_id": flow.incoming_contractor_id,
+            "incoming_contractor_name": incoming.name if incoming else None,
+            "incoming_contractor_email": incoming.email if incoming else None,
+            "reason": flow.reason,
+            "status": flow.status,
+            "superintendent_approved_at": str(flow.superintendent_approved_at) if flow.superintendent_approved_at else None,
+            "replacement_confirmed_at": str(flow.replacement_confirmed_at) if flow.replacement_confirmed_at else None,
+            "termination_sent_at": str(flow.termination_sent_at) if flow.termination_sent_at else None,
+            "created_at": str(flow.created_at),
+        }
+    finally:
+        db.close()
+
+
+def advance_termination_flow(flow_id: int, new_status: str) -> dict:
+    """Advance a termination flow to the next status and set the corresponding timestamp."""
+    db = SessionLocal()
+    try:
+        flow = db.query(TerminationFlow).get(flow_id)
+        if not flow:
+            return {"error": f"TerminationFlow {flow_id} not found"}
+
+        flow.status = new_status
+        now = datetime.utcnow()
+
+        if new_status == "replacement_outreach_sent":
+            pass  # superintendent_approved_at set by the API endpoint
+        elif new_status == "replacement_confirmed":
+            flow.replacement_confirmed_at = now
+        elif new_status == "termination_sent":
+            flow.termination_sent_at = now
+        elif new_status == "complete":
+            pass
+
+        flow.updated_at = now
+        db.commit()
+        return {"flow_id": flow_id, "status": new_status}
+    finally:
+        db.close()
+
+
 # Tool definitions for Claude API
 TOOL_DEFINITIONS = [
     {
@@ -341,7 +444,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "project_id": {"type": "integer"},
-                "alert_type": {"type": "string", "enum": ["behind_schedule", "no_response", "task_blocked", "risk"]},
+                "alert_type": {"type": "string", "enum": ["behind_schedule", "no_response", "task_blocked", "risk", "termination_recommendation"]},
                 "message": {"type": "string"},
                 "task_id": {"type": "integer"},
             },
@@ -371,6 +474,46 @@ TOOL_DEFINITIONS = [
             "required": ["project_id", "status"],
         },
     },
+    {
+        "name": "create_termination_flow",
+        "description": "Create a contractor termination flow with a pending_approval status and alert the superintendent.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "The task the contractor is being removed from"},
+                "outgoing_contractor_id": {"type": "integer", "description": "ID of the contractor to be terminated"},
+                "incoming_contractor_id": {"type": "integer", "description": "ID of the replacement contractor"},
+                "reason": {"type": "string", "description": "Clear reason for the termination recommendation"},
+            },
+            "required": ["task_id", "outgoing_contractor_id", "incoming_contractor_id", "reason"],
+        },
+    },
+    {
+        "name": "get_termination_flow",
+        "description": "Get full details of a termination flow including contractor names, task, and status.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "flow_id": {"type": "integer", "description": "The termination flow ID"}
+            },
+            "required": ["flow_id"],
+        },
+    },
+    {
+        "name": "advance_termination_flow",
+        "description": "Advance a termination flow to a new status.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "flow_id": {"type": "integer"},
+                "new_status": {
+                    "type": "string",
+                    "enum": ["replacement_outreach_sent", "replacement_confirmed", "termination_sent", "complete", "cancelled"],
+                },
+            },
+            "required": ["flow_id", "new_status"],
+        },
+    },
 ]
 
 # Map tool names to functions
@@ -384,4 +527,7 @@ TOOL_FUNCTIONS = {
     "create_alert": create_alert,
     "get_email_threads": get_email_threads,
     "update_project_status": update_project_status,
+    "create_termination_flow": create_termination_flow,
+    "get_termination_flow": get_termination_flow,
+    "advance_termination_flow": advance_termination_flow,
 }

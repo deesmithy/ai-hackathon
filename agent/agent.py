@@ -28,11 +28,19 @@ MODE_CONFIG = {
     },
     "status_monitor": {
         "system": prompts.STATUS_MONITOR,
-        "tools": ["get_project_context", "get_email_threads", "create_alert", "update_project_status"],
+        "tools": ["get_project_context", "get_email_threads", "create_alert", "update_project_status", "get_contractor_roster", "create_termination_flow"],
     },
     "reply_processor": {
         "system": prompts.REPLY_PROCESSOR,
-        "tools": ["get_project_context", "update_task_status", "create_alert", "get_email_threads"],
+        "tools": ["get_project_context", "update_task_status", "create_alert", "get_email_threads", "get_termination_flow", "advance_termination_flow"],
+    },
+    "termination_advisor": {
+        "system": prompts.TERMINATION_ADVISOR,
+        "tools": ["get_project_context", "get_contractor_roster", "get_email_threads", "create_termination_flow"],
+    },
+    "termination_executor": {
+        "system": prompts.TERMINATION_EXECUTOR,
+        "tools": ["get_termination_flow", "get_project_context", "send_email", "advance_termination_flow"],
     },
 }
 

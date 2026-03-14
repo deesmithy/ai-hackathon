@@ -104,9 +104,27 @@ class Alert(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
-    alert_type = Column(String, nullable=False)  # behind_schedule / no_response / task_blocked / risk
+    alert_type = Column(String, nullable=False)  # behind_schedule / no_response / task_blocked / risk / termination_recommendation
     message = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("Project", back_populates="alerts")
+
+
+class TerminationFlow(Base):
+    __tablename__ = "termination_flows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    outgoing_contractor_id = Column(Integer, ForeignKey("contractors.id"), nullable=False)
+    incoming_contractor_id = Column(Integer, ForeignKey("contractors.id"), nullable=False)
+    reason = Column(Text, nullable=False)
+    status = Column(String, default="pending_approval")
+    # pending_approval → replacement_outreach_sent → replacement_confirmed
+    # → termination_sent → complete | cancelled
+    superintendent_approved_at = Column(DateTime, nullable=True)
+    replacement_confirmed_at = Column(DateTime, nullable=True)
+    termination_sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

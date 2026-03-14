@@ -131,3 +131,30 @@ class ProcessReplyRequest(BaseModel):
     from_email: str
     subject: str
     body: str
+
+
+# --- Termination ---
+class EvaluateTerminationRequest(BaseModel):
+    task_id: int
+    contractor_id: int
+    reason: Optional[str] = None
+
+class ApproveTerminationRequest(BaseModel):
+    flow_id: int
+
+class CancelTerminationRequest(BaseModel):
+    flow_id: int
+
+class TerminationFlowOut(BaseModel):
+    id: int
+    task_id: int
+    outgoing_contractor_id: int
+    incoming_contractor_id: int
+    reason: str
+    status: str
+    superintendent_approved_at: Optional[datetime]
+    replacement_confirmed_at: Optional[datetime]
+    termination_sent_at: Optional[datetime]
+    created_at: datetime
+    class Config:
+        from_attributes = True
