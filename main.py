@@ -81,17 +81,17 @@ async def lifespan(app: FastAPI):
     print("Scheduler started: daily status sweep at 8am.")
 
     # Auto-generate contractor replies (simulator) — runs first, writes inbound emails to DB
-    scheduler.add_job(scheduled_simulate_replies, "interval", seconds=30, id="simulate_replies")
-    print("Auto-reply simulator enabled: every 30 seconds.")
+    scheduler.add_job(scheduled_simulate_replies, "interval", seconds=8, id="simulate_replies")
+    print("Auto-reply simulator enabled: every 8 seconds.")
 
     # Poll DB for inbound emails — runs after simulator, picks up replies and processes them
-    # Offset by 10s so simulator writes first, then poller reads
+    # Offset by 4s so simulator writes first, then poller reads
     from datetime import datetime, timedelta
     scheduler.add_job(
-        scheduled_poll_emails, "interval", seconds=30, id="poll_emails",
-        next_run_time=datetime.now() + timedelta(seconds=15),
+        scheduled_poll_emails, "interval", seconds=8, id="poll_emails",
+        next_run_time=datetime.now() + timedelta(seconds=4),
     )
-    print("Inbound email polling enabled: every 30 seconds (offset 15s from simulator).")
+    print("Inbound email polling enabled: every 8 seconds (offset 4s from simulator).")
 
     yield
 

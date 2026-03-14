@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
 from database import get_db
-from models import Project, Email, Task, OutreachQueue, TerminationFlow, Contractor
+from models import Project, Email, Task, OutreachQueue, TerminationFlow, Contractor, Alert
 from schemas import GeneratePlanRequest, AssignContractorsRequest, RunOutreachRequest, CheckStatusRequest, ProcessReplyRequest, EvaluateTerminationRequest, ApproveTerminationRequest, CancelTerminationRequest, TerminationFlowOut, DemoTerminationRequest, RegenerateTasksRequest, ReassignContractorsRequest
 from agent.agent import run_agent, generate_tasks_direct, assign_and_draft_direct
 from services.contractor_service import get_contractor_by_email
@@ -423,44 +423,6 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
                 return db.query(Contractor).filter(Contractor.id == oq.contractor_id).first()
             return get_contractor_by_email(db, data.from_email)
 
-        # --- 1. Question / no state change → auto-respond with followup ---
-        if task_after and not status_changed and not dates_just_confirmed:
-            contractor = _get_task_contractor(task_id)
-            project = db.query(Project).filter(Project.id == task_after.project_id).first()
-            if contractor and project:
-                run_agent(
-                    "followup_responder",
-                    f"A contractor replied with a question or comment that needs a response.\n"
-                    f"Contractor: {contractor.name} (email: {contractor.email}, ID: {contractor.id})\n"
-                    f"Task: {task_after.name} (ID: {task_id}), Project: {project.name} (ID: {project.id})\n"
-                    f"Their message:\n{data.body}\n\n"
-                    f"Read the email thread, understand their question, and send a helpful reply."
-                )
-                print(f"[FOLLOWUP] Auto-responded to question on task {task_id}")
-
-        # --- 2. Date counter-proposal was rejected (dates NOT confirmed, but reply was about dates) ---
-        if task_after and task_after.status == "committed" and not task_after.dates_confirmed and pre_status == "committed":
-            # Check if a new alert about date conflict was just created
-            from sqlalchemy import desc
-            recent_alert = db.query(Alert).filter(
-                Alert.task_id == task_id,
-                Alert.message.ilike("%conflict%"),
-            ).order_by(desc(Alert.created_at)).first()
-            if recent_alert:
-                contractor = _get_task_contractor(task_id)
-                project = db.query(Project).filter(Project.id == task_after.project_id).first()
-                if contractor and project:
-                    run_agent(
-                        "followup_responder",
-                        f"A contractor counter-proposed dates that conflict with project constraints.\n"
-                        f"Contractor: {contractor.name} (email: {contractor.email}, ID: {contractor.id})\n"
-                        f"Task: {task_after.name} (ID: {task_id}), Project: {project.name} (ID: {project.id})\n"
-                        f"Their message:\n{data.body}\n\n"
-                        f"Explain why their proposed dates don't work (check dependencies), "
-                        f"suggest valid alternatives, and ask them to confirm."
-                    )
-                    print(f"[FOLLOWUP] Explained date conflict on task {task_id}")
-
         # --- 3. Reschedule downstream if dates changed ---
         db.expire_all()
         task_for_dates = db.query(Task).filter(Task.id == task_id).first()
@@ -481,7 +443,8 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
                 if upstream_ok:
                     project = db.query(Project).filter(Project.id == task_for_dates.project_id).first()
                     outreach = db.query(OutreachQueue).filter(
-                        OutreachQueue.task_id == task_id, OutreachQueue.status == "sent"
+                        OutreachQueue.task_id == task_id,
+                        OutreachQueue.status.in_(["sent", "accepted"]),
                     ).first()
                     contractor = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first() if outreach else None
                     if contractor and project:
@@ -504,7 +467,8 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
                 for dt in downstream_tasks:
                     project = db.query(Project).filter(Project.id == dt.project_id).first()
                     dt_outreach = db.query(OutreachQueue).filter(
-                        OutreachQueue.task_id == dt.id, OutreachQueue.status == "sent"
+                        OutreachQueue.task_id == dt.id,
+                        OutreachQueue.status.in_(["sent", "accepted"]),
                     ).first()
                     dt_contractor = db.query(Contractor).filter(Contractor.id == dt_outreach.contractor_id).first() if dt_outreach else None
                     if dt_contractor and project:
