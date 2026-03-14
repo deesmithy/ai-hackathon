@@ -556,6 +556,7 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
                     subject=data.subject,
                     body=data.body,
                     from_email=data.from_email,
+                    processed=True,  # already being processed — prevent scheduler from re-processing
                 )
                 db.add(inbound)
                 db.commit()
