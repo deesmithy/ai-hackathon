@@ -125,6 +125,17 @@
                 Terminations
                 {% if termination_flows %}<span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full" :class="activeTab==='terminations' ? 'bg-brand-100 text-brand-700' : 'bg-surface-100 text-surface-400'">{{ termination_flows|length }}</span>{% endif %}
             </button>
+            <button @click="activeTab='agent_log'" class="px-5 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px"
+                :class="activeTab==='agent_log' ? 'border-brand-600 text-brand-700' : 'border-transparent text-surface-400 hover:text-gray-700'">
+                Agent Log
+                {% if agent_actions %}<span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full" :class="activeTab==='agent_log' ? 'bg-brand-100 text-brand-700' : 'bg-surface-100 text-surface-400'">{{ agent_actions|length }}</span>{% endif %}
+            </button>
+            <div class="flex-1"></div>
+            <a href="/projects/{{ project.id }}/inject-email"
+               class="ml-2 mb-px inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border border-surface-200 text-surface-500 hover:border-orange-300 hover:bg-orange-50 hover:text-orange-700 transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 9v.906a2.25 2.25 0 01-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 001.183 1.981l6.478 3.488m8.839 2.51l-4.66-2.51m0 0l-1.023-.55a2.25 2.25 0 00-2.134 0l-1.022.55m0 0l-4.661 2.51m16.5 1.615a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V8.844a2.25 2.25 0 011.183-1.98l7.5-4.04a2.25 2.25 0 012.134 0l7.5 4.04a2.25 2.25 0 011.183 1.98V19.5z"/></svg>
+                Inject Email
+            </a>
         </div>
 
     <!-- ===== TASKS & SCHEDULE TAB ===== -->
@@ -205,10 +216,128 @@
     </div>
     {% endif %}
 
+    <!-- Alpine Store: seed initial task data, poll every 15s -->
+    <script>
+    document.addEventListener('alpine:init', () => {
+        Alpine.store('project', {
+            tasks: [
+                {% for t in tasks %}
+                {
+                    id: {{ t.id }},
+                    sequence_order: {{ t.sequence_order }},
+                    name: {{ t.name | tojson }},
+                    description: {{ (t.description or '') | tojson }},
+                    specialty_needed: {{ (t.specialty_needed or '') | tojson }},
+                    status: {{ t.status | tojson }},
+                    dates_confirmed: {{ 'true' if t.dates_confirmed else 'false' }},
+                    estimated_days: {{ t.estimated_days if t.estimated_days else 'null' }},
+                    scheduled_start: {{ t.scheduled_start.isoformat() | tojson if t.scheduled_start else 'null' }},
+                    scheduled_end: {{ t.scheduled_end.isoformat() | tojson if t.scheduled_end else 'null' }},
+                    contractor_name: {{ (t.contractor_name or '') | tojson }},
+                },
+                {% endfor %}
+            ],
+            poll() {
+                fetch('/api/projects/{{ project.id }}/live-status')
+                    .then(r => r.json())
+                    .then(data => { this.tasks = data.tasks; })
+                    .catch(() => {});
+            }
+        });
+        setInterval(() => Alpine.store('project').poll(), 15000);
+    });
+
+    function taskStatusLabel(task) {
+        if (task.status === 'complete' || task.status === 'in_progress') return 'Work Complete';
+        if (task.status === 'committed' && task.dates_confirmed) return 'Confirmed';
+        if (task.status === 'committed' && !task.dates_confirmed) return 'In Discussion';
+        if (task.status === 'outreach_sent') return 'Outreach Sent';
+        if (task.status === 'blocked') return 'Blocked';
+        return 'Pending';
+    }
+
+    function taskStatusClass(task) {
+        if (task.status === 'complete' || task.status === 'in_progress') return 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200';
+        if (task.status === 'committed' && task.dates_confirmed) return 'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200';
+        if (task.status === 'committed' && !task.dates_confirmed) return 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200';
+        if (task.status === 'outreach_sent') return 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200';
+        if (task.status === 'blocked') return 'bg-red-50 text-red-700 ring-1 ring-inset ring-red-200';
+        return 'bg-surface-100 text-surface-500';
+    }
+
+    function calendarView() {
+        const statusColors = {
+            start: 'bg-sky-100 text-sky-700 border border-sky-200',
+            end: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+            mid: 'bg-violet-100 text-violet-700 border border-violet-200',
+            complete: 'bg-emerald-50 text-emerald-600 border border-emerald-200',
+            start_tentative: 'bg-sky-50 text-sky-500 border border-dashed border-sky-300',
+            end_tentative: 'bg-emerald-50 text-emerald-500 border border-dashed border-emerald-300',
+            mid_tentative: 'bg-violet-50 text-violet-500 border border-dashed border-violet-300',
+        };
+
+        return {
+            year: new Date().getFullYear(),
+            month: new Date().getMonth(),
+            get monthLabel() {
+                return new Date(this.year, this.month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            },
+            prevMonth() { if (this.month === 0) { this.month = 11; this.year--; } else { this.month--; } },
+            nextMonth() { if (this.month === 11) { this.month = 0; this.year++; } else { this.month++; } },
+            goToday() { const d = new Date(); this.year = d.getFullYear(); this.month = d.getMonth(); },
+            get cells() {
+                const first = new Date(this.year, this.month, 1);
+                const startDay = first.getDay();
+                const daysInMonth = new Date(this.year, this.month + 1, 0).getDate();
+                const prevDays = new Date(this.year, this.month, 0).getDate();
+                const today = new Date(); today.setHours(0,0,0,0);
+                const cells = [];
+                const toStr = (y,m,d) => `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                for (let i = startDay - 1; i >= 0; i--) {
+                    const d = prevDays - i;
+                    const m = this.month === 0 ? 11 : this.month - 1;
+                    const y = this.month === 0 ? this.year - 1 : this.year;
+                    cells.push({ day: d, inMonth: false, isToday: false, tasks: this._tasksForDate(toStr(y, m, d)) });
+                }
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = toStr(this.year, this.month, d);
+                    const isToday = new Date(this.year, this.month, d).getTime() === today.getTime();
+                    cells.push({ day: d, inMonth: true, isToday, tasks: this._tasksForDate(dateStr) });
+                }
+                const remaining = 42 - cells.length;
+                const nm = this.month === 11 ? 0 : this.month + 1;
+                const ny = this.month === 11 ? this.year + 1 : this.year;
+                for (let d = 1; d <= remaining; d++) {
+                    cells.push({ day: d, inMonth: false, isToday: false, tasks: this._tasksForDate(toStr(ny, nm, d)) });
+                }
+                return cells;
+            },
+            _tasksForDate(dateStr) {
+                const tasks = Alpine.store('project').tasks;
+                const results = [];
+                for (const t of tasks) {
+                    if (!t.scheduled_start) continue;
+                    const s = t.scheduled_start;
+                    const e = t.scheduled_end || t.scheduled_start;
+                    if (dateStr < s || dateStr > e) continue;
+                    const tentative = !t.dates_confirmed && t.status !== 'complete';
+                    let colorKey = 'mid';
+                    let label = t.name;
+                    if (t.status === 'complete') colorKey = 'complete';
+                    else if (dateStr === s && dateStr === e) { colorKey = tentative ? 'start_tentative' : 'start'; }
+                    else if (dateStr === s) { colorKey = tentative ? 'start_tentative' : 'start'; label = '▸ ' + t.name; }
+                    else if (dateStr === e) { colorKey = tentative ? 'end_tentative' : 'end'; label = t.name + ' ▪'; }
+                    else if (tentative) { colorKey = 'mid_tentative'; }
+                    results.push({ id: t.id, name: t.name, label, contractor: t.contractor_name || 'Unassigned', color: statusColors[colorKey] });
+                }
+                return results;
+            }
+        };
+    }
+    </script>
+
     <!-- Schedule Calendar -->
-    {% set scheduled_tasks = tasks | selectattr('scheduled_start') | list %}
-    {% if scheduled_tasks %}
-    <div x-data="calendarView()" class="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden mb-6">
+    <div x-data="calendarView()" x-show="$store.project.tasks.some(t => t.scheduled_start)" class="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden mb-6">
         <div class="px-6 py-4 border-b border-surface-100 flex items-center justify-between">
             <div class="flex items-center space-x-3">
                 <div class="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
@@ -258,187 +387,74 @@
             <div class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded bg-emerald-100 border border-emerald-300"></span><span>Complete</span></div>
         </div>
     </div>
-    <script>
-    function calendarView() {
-        const tasks = [
-            {% for t in scheduled_tasks %}
-            {
-                id: {{ t.id }},
-                name: {{ t.name | tojson }},
-                start: {{ t.scheduled_start.isoformat() | tojson if t.scheduled_start else 'null' }},
-                end: {{ t.scheduled_end.isoformat() | tojson if t.scheduled_end else 'null' }},
-                status: {{ t.status | tojson }},
-                contractor: {{ (t.contractor_name or 'Unassigned') | tojson }},
-                datesConfirmed: {{ 'true' if t.dates_confirmed else 'false' }},
-            },
-            {% endfor %}
-        ];
-
-        const statusColors = {
-            start: 'bg-sky-100 text-sky-700 border border-sky-200',
-            end: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-            mid: 'bg-violet-100 text-violet-700 border border-violet-200',
-            complete: 'bg-emerald-50 text-emerald-600 border border-emerald-200',
-            start_tentative: 'bg-sky-50 text-sky-500 border border-dashed border-sky-300',
-            end_tentative: 'bg-emerald-50 text-emerald-500 border border-dashed border-emerald-300',
-            mid_tentative: 'bg-violet-50 text-violet-500 border border-dashed border-violet-300',
-        };
-
-        return {
-            year: new Date().getFullYear(),
-            month: new Date().getMonth(),
-            get monthLabel() {
-                return new Date(this.year, this.month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-            },
-            prevMonth() { if (this.month === 0) { this.month = 11; this.year--; } else { this.month--; } },
-            nextMonth() { if (this.month === 11) { this.month = 0; this.year++; } else { this.month++; } },
-            goToday() { const d = new Date(); this.year = d.getFullYear(); this.month = d.getMonth(); },
-            get cells() {
-                const first = new Date(this.year, this.month, 1);
-                const startDay = first.getDay();
-                const daysInMonth = new Date(this.year, this.month + 1, 0).getDate();
-                const prevDays = new Date(this.year, this.month, 0).getDate();
-                const today = new Date(); today.setHours(0,0,0,0);
-                const cells = [];
-
-                const toStr = (y,m,d) => `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-
-                for (let i = startDay - 1; i >= 0; i--) {
-                    const d = prevDays - i;
-                    const m = this.month === 0 ? 11 : this.month - 1;
-                    const y = this.month === 0 ? this.year - 1 : this.year;
-                    cells.push({ day: d, inMonth: false, isToday: false, tasks: this._tasksForDate(toStr(y, m, d)) });
-                }
-                for (let d = 1; d <= daysInMonth; d++) {
-                    const dateStr = toStr(this.year, this.month, d);
-                    const isToday = new Date(this.year, this.month, d).getTime() === today.getTime();
-                    cells.push({ day: d, inMonth: true, isToday, tasks: this._tasksForDate(dateStr) });
-                }
-                const remaining = 42 - cells.length;
-                const nm = this.month === 11 ? 0 : this.month + 1;
-                const ny = this.month === 11 ? this.year + 1 : this.year;
-                for (let d = 1; d <= remaining; d++) {
-                    cells.push({ day: d, inMonth: false, isToday: false, tasks: this._tasksForDate(toStr(ny, nm, d)) });
-                }
-                return cells;
-            },
-            _tasksForDate(dateStr) {
-                const results = [];
-                for (const t of tasks) {
-                    if (!t.start) continue;
-                    const s = t.start;
-                    const e = t.end || t.start;
-                    if (dateStr < s || dateStr > e) continue;
-
-                    const tentative = !t.datesConfirmed && t.status !== 'complete';
-                    let colorKey = 'mid';
-                    let label = t.name;
-                    if (t.status === 'complete') colorKey = 'complete';
-                    else if (dateStr === s && dateStr === e) { colorKey = tentative ? 'start_tentative' : 'start'; }
-                    else if (dateStr === s) { colorKey = tentative ? 'start_tentative' : 'start'; label = '▸ ' + t.name; }
-                    else if (dateStr === e) { colorKey = tentative ? 'end_tentative' : 'end'; label = t.name + ' ▪'; }
-                    else if (tentative) { colorKey = 'mid_tentative'; }
-
-                    results.push({ id: t.id, name: t.name, label, contractor: t.contractor, color: statusColors[colorKey] });
-                }
-                return results;
-            }
-        };
-    }
-    </script>
-    {% endif %}
 
     <!-- Tasks Table -->
     <div class="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden mb-8">
-        <div class="px-6 py-4 border-b border-surface-100 flex items-center space-x-3">
-            <div class="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center">
-                <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h.75"/></svg>
+        <div class="px-6 py-4 border-b border-surface-100 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center">
+                    <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h.75"/></svg>
+                </div>
+                <h2 class="font-semibold text-gray-900">Tasks <span class="text-surface-400 font-normal" x-text="'(' + $store.project.tasks.length + ')'"></span></h2>
             </div>
-            <h2 class="font-semibold text-gray-900">Tasks <span class="text-surface-400 font-normal">({{ tasks|length }})</span></h2>
+            <span class="text-xs text-surface-300 flex items-center gap-1">
+                <svg class="w-3 h-3 animate-pulse text-emerald-400" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+                Live · updates every 15s
+            </span>
         </div>
-        {% if tasks %}
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto" x-show="$store.project.tasks.length > 0">
             <table class="w-full text-sm">
                 <thead class="bg-surface-50 text-surface-400 text-xs uppercase tracking-wider">
                     <tr>
                         <th class="px-6 py-3 text-left font-medium">#</th>
                         <th class="px-6 py-3 text-left font-medium">Task</th>
                         <th class="px-6 py-3 text-left font-medium">Specialty</th>
-                        <th class="px-6 py-3 text-left font-medium">Status</th>
                         <th class="px-6 py-3 text-left font-medium">Est. Days</th>
                         <th class="px-6 py-3 text-left font-medium">Contractor</th>
-                        <th class="px-6 py-3 text-left font-medium">Confirmed</th>
+                        <th class="px-6 py-3 text-left font-medium">Status</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-surface-100">
-                    {% for task in tasks %}
-                    {% set task_badge = {
-                        'pending': 'bg-surface-100 text-surface-500',
-                        'assigned': 'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200',
-                        'outreach_sent': 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200',
-                        'committed': 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200',
-                        'in_progress': 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
-                        'complete': 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200',
-                        'blocked': 'bg-red-50 text-red-700 ring-1 ring-inset ring-red-200',
-                    } %}
-                    <tr class="hover:bg-surface-50/50 transition-colors">
-                        <td class="px-6 py-3.5 text-surface-400 font-medium">{{ task.sequence_order }}</td>
-                        <td class="px-6 py-3.5">
-                            <div class="font-medium text-gray-900">{{ task.name }}</div>
-                            {% if task.description %}<div class="text-surface-400 text-xs mt-0.5 leading-relaxed">{{ task.description[:80] }}</div>{% endif %}
-                        </td>
-                        <td class="px-6 py-3.5 text-surface-500">{{ task.specialty_needed or '—' }}</td>
-                        <td class="px-6 py-3.5">
-                            <span class="text-xs font-medium px-2.5 py-1 rounded-lg {{ task_badge.get(task.status, 'bg-surface-100 text-surface-500') }}">
-                                {{ task.status | replace('_', ' ') | title }}
-                            </span>
-                        </td>
-                        <td class="px-6 py-3.5 text-surface-500">{{ task.estimated_days or '—' }}</td>
-                        <td class="px-6 py-3.5">
-                            {% if task.contractor_name %}
-                            <div class="flex items-center space-x-2">
-                                <div class="w-6 h-6 rounded-full bg-brand-100 flex items-center justify-center">
-                                    <span class="text-xs font-semibold text-brand-700">{{ task.contractor_name[0] | upper }}</span>
-                                </div>
-                                <span class="text-gray-700">{{ task.contractor_name }}</span>
-                            </div>
-                            {% else %}<span class="text-surface-300">—</span>{% endif %}
-                        </td>
-                        <td class="px-6 py-3.5">
-                            {% if task.outreach_status == 'accepted' or task.status == 'committed' %}
-                            <span class="inline-flex items-center space-x-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-                                <span>Confirmed</span>
-                            </span>
-                            {% elif task.outreach_status == 'declined' %}
-                            <span class="inline-flex items-center space-x-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-red-50 text-red-700 ring-1 ring-inset ring-red-200">
-                                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 18L18 6M6 6l12 12"/></svg>
-                                <span>Declined</span>
-                            </span>
-                            {% elif task.outreach_status == 'sent' or task.status == 'outreach_sent' %}
-                            <span class="inline-flex items-center space-x-1 text-xs font-medium px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200">
-                                <svg class="w-3 h-3 animate-pulse" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/></svg>
-                                <span>Awaiting reply</span>
-                            </span>
-                            {% elif task.outreach_status == 'no_response' %}
-                            <span class="text-xs font-medium px-2.5 py-1 rounded-lg bg-surface-100 text-surface-500">No response</span>
-                            {% else %}
-                            <span class="text-surface-300 text-xs">—</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
+                    <template x-for="task in $store.project.tasks" :key="task.id">
+                        <tr class="hover:bg-surface-50/50 transition-colors">
+                            <td class="px-6 py-3.5 text-surface-400 font-medium" x-text="task.sequence_order"></td>
+                            <td class="px-6 py-3.5">
+                                <div class="font-medium text-gray-900" x-text="task.name"></div>
+                                <div class="text-surface-400 text-xs mt-0.5 leading-relaxed"
+                                     x-show="task.description"
+                                     x-text="(task.description || '').slice(0, 80)"></div>
+                            </td>
+                            <td class="px-6 py-3.5 text-surface-500" x-text="task.specialty_needed || '—'"></td>
+                            <td class="px-6 py-3.5 text-surface-500" x-text="task.estimated_days || '—'"></td>
+                            <td class="px-6 py-3.5">
+                                <template x-if="task.contractor_name">
+                                    <div class="flex items-center space-x-2">
+                                        <div class="w-6 h-6 rounded-full bg-brand-100 flex items-center justify-center">
+                                            <span class="text-xs font-semibold text-brand-700" x-text="(task.contractor_name || '?')[0].toUpperCase()"></span>
+                                        </div>
+                                        <span class="text-gray-700" x-text="task.contractor_name"></span>
+                                    </div>
+                                </template>
+                                <template x-if="!task.contractor_name">
+                                    <span class="text-surface-300">—</span>
+                                </template>
+                            </td>
+                            <td class="px-6 py-3.5">
+                                <span class="text-xs font-medium px-2.5 py-1 rounded-lg"
+                                      :class="taskStatusClass(task)"
+                                      x-text="taskStatusLabel(task)"></span>
+                            </td>
+                        </tr>
+                    </template>
                 </tbody>
             </table>
         </div>
-        {% else %}
-        <div class="px-6 py-12 text-center">
+        <div class="px-6 py-12 text-center" x-show="$store.project.tasks.length === 0">
             <div class="w-12 h-12 rounded-xl bg-surface-100 flex items-center justify-center mx-auto mb-3">
                 <svg class="w-6 h-6 text-surface-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h.75"/></svg>
             </div>
             <p class="text-sm text-surface-400">No tasks yet. Generate a plan to get started.</p>
         </div>
-        {% endif %}
     </div>
 
     </div> <!-- end Tasks & Schedule tab -->
@@ -671,6 +687,72 @@
         </div>
         {% endif %}
     </div> <!-- end Terminations tab -->
+
+    <!-- ===== AGENT LOG TAB ===== -->
+    <div x-show="activeTab==='agent_log'">
+        {% if agent_actions %}
+        <div class="flex items-center justify-between mb-4">
+            <p class="text-sm text-surface-400">{{ agent_actions|length }} action{{ 's' if agent_actions|length != 1 }} logged — most recent first</p>
+            <a href="/projects/{{ project.id }}/inject-email"
+               class="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 9v.906a2.25 2.25 0 01-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 001.183 1.981l6.478 3.488m8.839 2.51l-4.66-2.51m0 0l-1.023-.55a2.25 2.25 0 00-2.134 0l-1.022.55m0 0l-4.661 2.51m16.5 1.615a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V8.844a2.25 2.25 0 011.183-1.98l7.5-4.04a2.25 2.25 0 012.134 0l7.5 4.04a2.25 2.25 0 011.183 1.98V19.5z"/></svg>
+                Inject Email
+            </a>
+        </div>
+        <div class="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden">
+            {% for action in agent_actions %}
+            <div class="flex items-start gap-4 px-5 py-3.5 {{ 'border-t border-surface-100' if not loop.first }}">
+                <!-- Icon based on action type -->
+                <div class="flex-shrink-0 mt-0.5">
+                    {% if action.action_type == 'send_email' %}
+                    <span class="w-7 h-7 rounded-lg bg-sky-50 flex items-center justify-center">
+                        <svg class="w-3.5 h-3.5 text-sky-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+                    </span>
+                    {% elif action.action_type == 'update_task_status' %}
+                    <span class="w-7 h-7 rounded-lg bg-violet-50 flex items-center justify-center">
+                        <svg class="w-3.5 h-3.5 text-violet-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+                    </span>
+                    {% elif action.action_type == 'create_alert' %}
+                    <span class="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center">
+                        <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                    </span>
+                    {% elif action.action_type in ('create_termination_flow', 'advance_termination_flow') %}
+                    <span class="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center">
+                        <svg class="w-3.5 h-3.5 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/></svg>
+                    </span>
+                    {% elif action.action_type == 'mark_outreach_status' %}
+                    <span class="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center">
+                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </span>
+                    {% else %}
+                    <span class="w-7 h-7 rounded-lg bg-surface-100 flex items-center justify-center">
+                        <svg class="w-3.5 h-3.5 text-surface-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    </span>
+                    {% endif %}
+                </div>
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm text-gray-900">{{ action.description }}</p>
+                    <div class="flex items-center gap-3 mt-0.5">
+                        <span class="text-xs text-surface-400">{{ action.created_at.strftime('%b %d, %H:%M') }}</span>
+                        <span class="text-xs px-1.5 py-0.5 rounded bg-surface-100 text-surface-500 font-mono">{{ action.agent_mode or '—' }}</span>
+                        {% if action.task_id %}<span class="text-xs text-surface-400">task #{{ action.task_id }}</span>{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="bg-white rounded-xl border border-surface-200 shadow-sm p-8 text-center">
+            <svg class="w-8 h-8 text-surface-300 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/></svg>
+            <p class="text-sm text-surface-400 mb-4">No agent actions logged yet. Actions appear here once the agent starts sending emails, updating tasks, or managing contractors.</p>
+            <a href="/projects/{{ project.id }}/inject-email"
+               class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                Inject an Email to Trigger the Agent
+            </a>
+        </div>
+        {% endif %}
+    </div> <!-- end Agent Log tab -->
 
     </div> <!-- end tab container x-data -->
 </div>

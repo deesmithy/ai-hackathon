@@ -10,7 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
 from database import Base, engine, get_db
-from models import Project, Task, Alert, Email, Contractor, OutreachQueue, TerminationFlow
+from models import Project, Task, Alert, Email, Contractor, OutreachQueue, TerminationFlow, AgentAction
 from seed import seed_contractors
 from services.email_service import poll_gmail_inbox
 
@@ -203,6 +203,14 @@ def project_detail_page(project_id: int, request: Request, db: Session = Depends
         incoming = db.query(Contractor).get(f.incoming_contractor_id)
         f.incoming_name = incoming.name if incoming else "Unknown"
 
+    agent_actions = (
+        db.query(AgentAction)
+        .filter(AgentAction.project_id == project_id)
+        .order_by(AgentAction.created_at.desc())
+        .limit(200)
+        .all()
+    )
+
     return templates.TemplateResponse("project_detail.html", {
         "request": request,
         "project": project,
@@ -210,6 +218,35 @@ def project_detail_page(project_id: int, request: Request, db: Session = Depends
         "alerts": alerts,
         "email_threads": email_threads,
         "termination_flows": termination_flows,
+        "agent_actions": agent_actions,
+    })
+
+
+@app.get("/projects/{project_id}/inject-email", response_class=HTMLResponse)
+def inject_email_page(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return HTMLResponse("<h1>Not Found</h1>", status_code=404)
+
+    tasks_list = db.query(Task).filter(Task.project_id == project_id).order_by(Task.sequence_order).all()
+
+    # Attach assigned contractor to each task
+    task_contractors = []
+    for t in tasks_list:
+        outreach = db.query(OutreachQueue).filter(
+            OutreachQueue.task_id == t.id,
+            OutreachQueue.status.in_(["sent", "accepted"]),
+        ).order_by(OutreachQueue.priority_order).first()
+        contractor = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first() if outreach else None
+        task_contractors.append({
+            "task": t,
+            "contractor": contractor,
+        })
+
+    return templates.TemplateResponse("inject_email.html", {
+        "request": request,
+        "project": project,
+        "task_contractors": task_contractors,
     })
 
 

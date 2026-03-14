@@ -38,6 +38,7 @@ class Project(Base):
 
     tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
     alerts = relationship("Alert", back_populates="project", cascade="all, delete-orphan")
+    agent_actions = relationship("AgentAction", back_populates="project", cascade="all, delete-orphan")
 
 
 class Task(Base):
@@ -113,6 +114,21 @@ class Alert(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("Project", back_populates="alerts")
+
+
+class AgentAction(Base):
+    __tablename__ = "agent_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
+    agent_mode = Column(String, nullable=True)
+    action_type = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    detail = Column(Text, nullable=True)  # JSON blob
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    project = relationship("Project", back_populates="agent_actions")
 
 
 class TerminationFlow(Base):

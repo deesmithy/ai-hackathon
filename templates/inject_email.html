@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Inject Email — {{ project.name }}{% endblock %}
+{% block content %}
+
+<script>
+const TASK_CONTRACTORS = [
+    {% for tc in task_contractors %}
+    {
+        task_id: {{ tc.task.id }},
+        task_name: {{ tc.task.name | tojson }},
+        task_seq: {{ tc.task.sequence_order }},
+        task_status: {{ tc.task.status | tojson }},
+        contractor_name: {{ (tc.contractor.name if tc.contractor else '') | tojson }},
+        contractor_email: {{ (tc.contractor.email if tc.contractor else '') | tojson }},
+        project_name: {{ project.name | tojson }},
+    },
+    {% endfor %}
+];
+</script>
+
+<div x-data="{
+    selectedIdx: null,
+    fromEmail: '',
+    subject: '',
+    body: '',
+    sending: false,
+    sent: false,
+    error: '',
+    get selected() { return this.selectedIdx !== null ? TASK_CONTRACTORS[this.selectedIdx] : null; },
+    selectTask(idx) {
+        this.selectedIdx = idx;
+        const tc = TASK_CONTRACTORS[idx];
+        this.fromEmail = tc.contractor_email;
+        this.subject = '[SUP-' + tc.task_id + '] ' + tc.task_name + ' - ' + tc.project_name;
+        this.body = '';
+    },
+    fillTemplate(tpl) {
+        const name = this.selected ? this.selected.contractor_name : 'Contractor';
+        const templates = {
+            cancel: 'Hi,\n\nUnfortunately I need to cancel. I have taken on another project that conflicts with this timeline and I am no longer available.\n\nSorry for the inconvenience.\n\nBest,\n' + name,
+            delay: 'Hi,\n\nI need to push my start date back by two weeks due to a delay on my current job. I can now start on the dates we discussed plus 14 days. Please let me know if that works.\n\nThanks,\n' + name,
+            decline: 'Hi,\n\nI have a conflict on the scheduled dates and cannot make it work. I will need to decline this job.\n\nApologies,\n' + name,
+            question: 'Hello,\n\nI have a question about the scope — can you clarify what materials are included and whether I need to supply my own equipment?\n\nThanks,\n' + name,
+        };
+        this.body = templates[tpl] || '';
+    },
+    async send() {
+        this.sending = true;
+        this.error = '';
+        try {
+            const resp = await fetch('/api/agent/process-reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ from_email: this.fromEmail, subject: this.subject, body: this.body })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { this.error = data.detail || 'Request failed'; }
+            else { this.sent = true; }
+        } catch(e) { this.error = String(e); }
+        finally { this.sending = false; }
+    }
+}" class="max-w-3xl mx-auto">
+
+    <!-- Breadcrumb -->
+    <a href="/projects/{{ project.id }}" class="inline-flex items-center text-sm text-surface-400 hover:text-brand-600 transition-colors mb-5">
+        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+        {{ project.name }}
+    </a>
+
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Inject Manual Email</h1>
+        <p class="text-sm text-surface-500 mt-1">Simulate an inbound email from a contractor — e.g. a cancellation or change request. The agent will process it and respond automatically.</p>
+    </div>
+
+    <!-- Success state -->
+    <div x-show="sent" x-cloak class="rounded-xl border border-emerald-200 bg-emerald-50 p-8 text-center">
+        <svg class="w-10 h-10 text-emerald-500 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <p class="text-emerald-800 font-semibold text-lg">Email processed by agent</p>
+        <p class="text-emerald-600 text-sm mt-1">Check the Agent Log and Emails tabs for the agent's response.</p>
+        <div class="flex gap-3 justify-center mt-5">
+            <a href="/projects/{{ project.id }}" class="px-5 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors">View Project</a>
+            <button @click="sent=false; selectedIdx=null; body=''" class="px-5 py-2 rounded-lg border border-surface-200 text-sm font-semibold text-gray-700 hover:bg-surface-50 transition-colors">Send Another</button>
+        </div>
+    </div>
+
+    <!-- Form -->
+    <div x-show="!sent">
+
+        <!-- Step 1: Pick task/contractor -->
+        <div class="bg-white rounded-xl border border-surface-200 shadow-sm mb-5">
+            <div class="px-6 py-4 border-b border-surface-100">
+                <h2 class="text-sm font-semibold text-gray-900">1. Select task &amp; contractor</h2>
+            </div>
+            <div class="p-4 grid gap-2">
+                {% for tc in task_contractors %}
+                <button
+                    @click="selectTask({{ loop.index0 }})"
+                    class="w-full text-left flex items-center gap-4 px-4 py-3 rounded-lg border transition-colors"
+                    :class="selectedIdx === {{ loop.index0 }} ? 'border-brand-400 bg-brand-50' : 'border-surface-200 hover:border-surface-300 hover:bg-surface-50'"
+                >
+                    <span class="flex-shrink-0 w-7 h-7 rounded-md bg-surface-100 flex items-center justify-center text-xs font-bold text-surface-500">{{ tc.task.sequence_order }}</span>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm font-medium text-gray-900 truncate">{{ tc.task.name }}</p>
+                        <p class="text-xs text-surface-400">
+                            {% if tc.contractor %}
+                                {{ tc.contractor.name }} &mdash; {{ tc.contractor.email }}
+                            {% else %}
+                                <span class="italic">No contractor with active outreach</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                    <span class="flex-shrink-0 w-4 h-4 rounded-full border-2 transition-colors"
+                        :class="selectedIdx === {{ loop.index0 }} ? 'border-brand-500 bg-brand-500' : 'border-surface-300'"></span>
+                </button>
+                {% else %}
+                <p class="text-sm text-surface-400 px-4 py-3">No tasks with active outreach found on this project.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Step 2: Compose email -->
+        <div class="bg-white rounded-xl border border-surface-200 shadow-sm mb-5 transition-opacity"
+             :class="selectedIdx === null ? 'opacity-40 pointer-events-none' : ''">
+            <div class="px-6 py-4 border-b border-surface-100">
+                <h2 class="text-sm font-semibold text-gray-900">2. Compose the email</h2>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-surface-500 mb-1">From (contractor email)</label>
+                    <input type="email" x-model="fromEmail"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-surface-200 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent"
+                        placeholder="contractor@example.com">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-surface-500 mb-1">Subject</label>
+                    <input type="text" x-model="subject"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-surface-200 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent font-mono text-xs">
+                    <p class="text-xs text-surface-400 mt-1">The <code class="bg-surface-100 px-1 rounded">[SUP-{id}]</code> prefix lets the agent link this reply to the correct task.</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-surface-500 mb-1">Body</label>
+                    <div class="flex flex-wrap gap-2 mb-2">
+                        <span class="text-xs text-surface-400 self-center mr-1">Quick fill:</span>
+                        <button type="button" @click="fillTemplate('cancel')"
+                            class="text-xs px-2.5 py-1 rounded-md border border-surface-200 hover:border-orange-300 hover:bg-orange-50 hover:text-orange-700 transition-colors">
+                            Cancellation
+                        </button>
+                        <button type="button" @click="fillTemplate('delay')"
+                            class="text-xs px-2.5 py-1 rounded-md border border-surface-200 hover:border-yellow-300 hover:bg-yellow-50 hover:text-yellow-700 transition-colors">
+                            Delay request
+                        </button>
+                        <button type="button" @click="fillTemplate('decline')"
+                            class="text-xs px-2.5 py-1 rounded-md border border-surface-200 hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors">
+                            Decline
+                        </button>
+                        <button type="button" @click="fillTemplate('question')"
+                            class="text-xs px-2.5 py-1 rounded-md border border-surface-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors">
+                            Question
+                        </button>
+                    </div>
+                    <textarea x-model="body" rows="8"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-surface-200 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent font-mono resize-none"
+                        placeholder="Type the contractor's message here…"></textarea>
+                </div>
+
+                <div x-show="error" x-cloak class="text-sm text-red-600 bg-red-50 rounded-lg px-4 py-3" x-text="error"></div>
+
+                <button @click="send()"
+                    :disabled="sending || !fromEmail || !subject || !body"
+                    class="w-full py-3 rounded-lg text-sm font-semibold transition-colors"
+                    :class="sending || !fromEmail || !subject || !body ? 'bg-surface-100 text-surface-400 cursor-not-allowed' : 'bg-brand-600 text-white hover:bg-brand-700'">
+                    <span x-show="!sending">Send to Agent for Processing</span>
+                    <span x-show="sending" class="flex items-center justify-center gap-2">
+                        <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        Processing…
+                    </span>
+                </button>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

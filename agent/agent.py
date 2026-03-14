@@ -9,6 +9,71 @@ from agent import prompts
 
 load_dotenv()
 
+
+def _log_action(mode: str, tool_name: str, tool_input: dict, result: dict):
+    """Persist a human-readable agent action to the agent_actions table."""
+    # Only log state-changing tools
+    READ_ONLY = {"get_project_context", "get_contractor_roster", "get_email_threads",
+                 "get_contractor_schedule", "get_termination_flow", "get_outreach_queue"}
+    if tool_name in READ_ONLY:
+        return
+
+    from database import SessionLocal
+    from models import AgentAction, Task
+
+    db = SessionLocal()
+    try:
+        task_id = tool_input.get("task_id")
+        project_id = tool_input.get("project_id")
+
+        # Derive project_id from task when not directly available
+        if not project_id and task_id:
+            task = db.query(Task).get(task_id)
+            if task:
+                project_id = task.project_id
+
+        # Build human-readable description
+        if tool_name == "send_email":
+            desc = f"Sent email to {tool_input.get('to_name', tool_input.get('to_email', '?'))}: \"{tool_input.get('subject', '')}\""
+        elif tool_name == "update_task_status":
+            parts = [f"Task {task_id} → {tool_input.get('status')}"]
+            if tool_input.get("scheduled_start"):
+                parts.append(f"dates {tool_input['scheduled_start']} – {tool_input.get('scheduled_end', '?')}")
+            if tool_input.get("dates_confirmed"):
+                parts.append("dates confirmed")
+            desc = ", ".join(parts)
+        elif tool_name == "create_alert":
+            desc = f"Alert [{tool_input.get('alert_type')}]: {tool_input.get('message', '')[:120]}"
+        elif tool_name == "mark_outreach_status":
+            desc = f"Marked contractor {tool_input.get('contractor_id')} as '{tool_input.get('status')}' for task {task_id}"
+        elif tool_name == "create_termination_flow":
+            desc = f"Created termination flow for task {task_id}: {tool_input.get('reason', '')[:100]}"
+        elif tool_name == "advance_termination_flow":
+            desc = f"Advanced termination flow {tool_input.get('flow_id')} → {tool_input.get('new_status')}"
+        elif tool_name == "assign_contractor_to_task":
+            desc = f"Assigned contractor {tool_input.get('contractor_id')} to task {task_id} (priority {tool_input.get('priority_order', 1)})"
+        elif tool_name == "update_project_status":
+            desc = f"Project status → {tool_input.get('status')}"
+        elif tool_name == "save_termination_summary":
+            desc = f"Saved executive summary for termination flow {tool_input.get('flow_id')}"
+        else:
+            desc = f"{tool_name}: {json.dumps(tool_input)[:120]}"
+
+        action = AgentAction(
+            project_id=project_id,
+            task_id=task_id,
+            agent_mode=mode,
+            action_type=tool_name,
+            description=desc,
+            detail=json.dumps({**tool_input, "result": result}, default=str)[:2000],
+        )
+        db.add(action)
+        db.commit()
+    except Exception as e:
+        print(f"[LOG] Failed to log agent action: {e}")
+    finally:
+        db.close()
+
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = "claude-sonnet-4-6"
 
@@ -165,6 +230,7 @@ def run_agent(mode: str, user_message: str) -> str:
                 }
             try:
                 result = TOOL_FUNCTIONS[tool_name](**tool_input)
+                _log_action(mode, tool_name, tool_input, result)
                 return {
                     "type": "tool_result",
                     "tool_use_id": tool_block.id,

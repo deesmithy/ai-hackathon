@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import date
 from database import get_db
-from models import Project, Task, Alert
+from models import Project, Task, Alert, OutreachQueue, Contractor
 from schemas import ProjectOut
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -63,6 +63,33 @@ def update_project_status(project_id: int, status: str, db: Session = Depends(ge
     project.status = status
     db.commit()
     return {"status": status}
+
+
+@router.get("/{project_id}/live-status")
+def project_live_status(project_id: int, db: Session = Depends(get_db)):
+    """Live-polling endpoint: returns current task list with all display data."""
+    tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.sequence_order).all()
+    result = []
+    for t in tasks:
+        outreach = db.query(OutreachQueue).filter(
+            OutreachQueue.task_id == t.id,
+            OutreachQueue.priority_order == 1,
+        ).first()
+        contractor = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first() if outreach else None
+        result.append({
+            "id": t.id,
+            "sequence_order": t.sequence_order,
+            "name": t.name,
+            "description": t.description,
+            "specialty_needed": t.specialty_needed,
+            "status": t.status,
+            "dates_confirmed": t.dates_confirmed,
+            "estimated_days": t.estimated_days,
+            "scheduled_start": t.scheduled_start.isoformat() if t.scheduled_start else None,
+            "scheduled_end": t.scheduled_end.isoformat() if t.scheduled_end else None,
+            "contractor_name": contractor.name if contractor else None,
+        })
+    return {"tasks": result}
 
 
 @router.delete("/{project_id}")
