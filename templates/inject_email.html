@@ -48,7 +48,7 @@ const TASK_CONTRACTORS = [
         this.sending = true;
         this.error = '';
         try {
-            const resp = await fetch('/api/agent/process-reply', {
+            const resp = await fetch('/api/agent/inject-reply', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ from_email: this.fromEmail, subject: this.subject, body: this.body })

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from datetime import datetime
 from database import get_db
@@ -338,6 +338,26 @@ def check_status(data: CheckStatusRequest, db: Session = Depends(get_db)):
     user_msg = f"Evaluate the current health of project ID {project.id} ({project.name}) and flag any issues."
     result = run_agent("status_monitor", user_msg)
     return {"project_id": project.id, "result": result}
+
+
+@router.post("/inject-reply")
+def inject_reply(data: ProcessReplyRequest, background_tasks: BackgroundTasks):
+    """Save inbound email and process it asynchronously. Returns immediately so the UI doesn't hang."""
+    import os, httpx
+
+    def _run():
+        port = int(os.getenv("APP_PORT", 8000))
+        try:
+            httpx.post(
+                f"http://localhost:{port}/api/agent/process-reply",
+                json={"from_email": data.from_email, "subject": data.subject, "body": data.body},
+                timeout=180.0,
+            )
+        except Exception as e:
+            print(f"[INJECT] Background processing error: {e}")
+
+    background_tasks.add_task(_run)
+    return {"status": "queued"}
 
 
 @router.post("/process-reply")
