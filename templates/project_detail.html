@@ -3,6 +3,27 @@
 {% block content %}
 <div x-data="{ outreachLoading: false, statusLoading: false, outreachDone: false, statusDone: false }">
 
+    <script>
+    function runOutreach(projectId) {
+        const done = aiAction(
+            'Running Contractor Outreach',
+            'The AI is drafting and sending emails to assigned contractors.',
+            ['Loading project context...', 'Reviewing assigned tasks...', 'Drafting professional emails...', 'Sending via Gmail...', 'Logging outreach records...']
+        );
+        return fetch('/api/agent/run-outreach', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id: projectId})})
+            .then(r => r.json()).finally(() => { done(); setTimeout(() => location.reload(), 800); });
+    }
+    function checkStatus(projectId) {
+        const done = aiAction(
+            'Checking Project Status',
+            'The AI is evaluating project health and flagging issues.',
+            ['Loading all tasks and dates...', 'Reviewing email threads...', 'Checking for overdue items...', 'Scanning for unresponsive contractors...', 'Creating alerts...', 'Updating project status...']
+        );
+        return fetch('/api/agent/check-status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id: projectId})})
+            .then(r => r.json()).finally(() => { done(); setTimeout(() => location.reload(), 800); });
+    }
+    </script>
+
     <!-- Breadcrumb -->
     <a href="/" class="inline-flex items-center text-sm text-surface-400 hover:text-brand-600 transition-colors mb-5">
         <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
@@ -28,21 +49,19 @@
             <p class="text-sm text-surface-500 leading-relaxed">{{ project.description[:200] }}</p>
         </div>
         <div class="flex items-center space-x-3 flex-shrink-0">
-            <button @click="outreachLoading=true; fetch('/api/agent/run-outreach', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:{{ project.id }}})}).then(r=>r.json()).then(()=>{outreachLoading=false;outreachDone=true;setTimeout(()=>location.reload(),1000)}).catch(()=>{outreachLoading=false})"
-                :disabled="outreachLoading"
+            <button @click="outreachLoading=true; runOutreach({{ project.id }}).finally(()=>outreachLoading=false)"
+                :disabled="outreachLoading || statusLoading"
                 class="inline-flex items-center space-x-2 bg-brand-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-brand-700 disabled:opacity-50 shadow-sm shadow-brand-600/20 transition-all">
                 <template x-if="outreachLoading"><svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
-                <template x-if="!outreachLoading && !outreachDone"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg></template>
-                <template x-if="outreachDone"><svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4.5 12.75l6 6 9-13.5"/></svg></template>
-                <span x-text="outreachDone ? 'Sent!' : outreachLoading ? 'Sending...' : 'Run Outreach'"></span>
+                <template x-if="!outreachLoading"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg></template>
+                <span x-text="outreachLoading ? 'Sending...' : 'Run Outreach'"></span>
             </button>
-            <button @click="statusLoading=true; fetch('/api/agent/check-status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id:{{ project.id }}})}).then(r=>r.json()).then(()=>{statusLoading=false;statusDone=true;setTimeout(()=>location.reload(),1000)}).catch(()=>{statusLoading=false})"
-                :disabled="statusLoading"
+            <button @click="statusLoading=true; checkStatus({{ project.id }}).finally(()=>statusLoading=false)"
+                :disabled="outreachLoading || statusLoading"
                 class="inline-flex items-center space-x-2 text-surface-500 bg-white px-4 py-2.5 rounded-xl text-sm font-semibold border border-surface-200 hover:border-surface-300 hover:text-gray-700 disabled:opacity-50 transition-all">
                 <template x-if="statusLoading"><svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></template>
-                <template x-if="!statusLoading && !statusDone"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg></template>
-                <template x-if="statusDone"><svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4.5 12.75l6 6 9-13.5"/></svg></template>
-                <span x-text="statusDone ? 'Done!' : statusLoading ? 'Checking...' : 'Check Status'"></span>
+                <template x-if="!statusLoading"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg></template>
+                <span x-text="statusLoading ? 'Checking...' : 'Check Status'"></span>
             </button>
         </div>
     </div>

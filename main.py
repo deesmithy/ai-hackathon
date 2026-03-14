@@ -1,4 +1,5 @@
 """Superintendent AI — FastAPI app, DB init, routes, scheduler startup."""
+from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends

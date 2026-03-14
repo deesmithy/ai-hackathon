@@ -1,4 +1,5 @@
 """9 tools the Claude agent can call."""
+from __future__ import annotations
 import json
 from datetime import datetime, date
 from database import SessionLocal

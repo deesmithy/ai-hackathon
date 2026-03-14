@@ -1,4 +1,5 @@
 """Email service: Gmail SMTP for outbound, Gmail IMAP for inbound."""
+from __future__ import annotations
 import os
 import re
 import smtplib

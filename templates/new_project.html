@@ -118,8 +118,12 @@ function projectForm() {
 
         async createAndPlan() {
             this.loading = true; this.error = null; this.plan = null;
+            const done = aiAction(
+                'Generating Construction Plan',
+                'The AI is breaking your project into ordered tasks.',
+                ['Creating project record...', 'Reading project description...', 'Checking available contractor specialties...', 'Designing task sequence...', 'Estimating durations...', 'Finalizing plan...']
+            );
             try {
-                this.loadingText = 'Creating project...';
                 const body = { name: this.name, description: this.description };
                 if (this.start_date) body.start_date = this.start_date;
                 if (this.target_end_date) body.target_end_date = this.target_end_date;
@@ -128,7 +132,6 @@ function projectForm() {
                 const project = await createRes.json();
                 this.projectId = project.id;
 
-                this.loadingText = 'AI is analyzing and generating tasks...';
                 const planRes = await fetch('/api/agent/generate-plan', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ project_id: project.id }) });
                 if (!planRes.ok) throw new Error('Failed to generate plan');
                 const planData = await planRes.json();
@@ -136,16 +139,24 @@ function projectForm() {
             } catch (e) {
                 this.error = e.message;
             }
+            done();
             this.loading = false;
         },
 
         async confirmAndAssign() {
             this.confirming = true; this.error = null;
+            const done = aiAction(
+                'Assigning Contractors',
+                'The AI is matching contractors to each task by specialty and rating.',
+                ['Loading contractor roster...', 'Reviewing task specialties...', 'Matching by rating and availability...', 'Creating assignments...']
+            );
             try {
                 const res = await fetch('/api/agent/assign-contractors', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ project_id: this.projectId }) });
                 if (!res.ok) throw new Error('Failed to assign contractors');
+                done();
                 window.location.href = '/projects/' + this.projectId;
             } catch (e) {
+                done();
                 this.error = e.message;
             }
             this.confirming = false;
