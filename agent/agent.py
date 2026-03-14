@@ -170,7 +170,7 @@ def generate_tasks_direct(user_message: str) -> list[dict]:
     full_message = user_message + f"\n\nAvailable contractor specialties: {', '.join(specialties)}"
 
     response = client.messages.create(
-        model=MODEL,
+        model="claude-haiku-4-5-20251001",
         max_tokens=4096,
         system=prompts.PLAN_GENERATOR,
         tools=[submit_tool],
@@ -238,7 +238,7 @@ def assign_and_draft_direct(project_id: int, project_name: str) -> list[dict]:
     )
 
     response = client.messages.create(
-        model=MODEL,
+        model="claude-haiku-4-5-20251001",
         max_tokens=8192,
         system=system_prompt,
         tools=[submit_tool],
