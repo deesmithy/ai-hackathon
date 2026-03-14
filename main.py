@@ -21,9 +21,10 @@ scheduler = BackgroundScheduler()
 
 
 def scheduled_poll_emails():
-    """Poll Gmail inbox for replies."""
-    from agent.agent import run_agent
+    """Poll DB for inbound emails and process them through the full reply pipeline."""
+    import httpx
     replies = poll_gmail_inbox()
+    port = int(os.getenv("APP_PORT", 8000))
     for reply in replies:
         msg = (
             f"Process this inbound email:\n"
@@ -32,14 +33,27 @@ def scheduled_poll_emails():
             f"Body:\n{reply['body']}\n\n"
         )
         if reply.get("task_id"):
-            msg += f"This is regarding task ID {reply['task_id']}."
-        else:
-            msg += (
-                "No task ID was found in the subject line. Try to determine which project "
-                "or task this relates to based on context clues in the email. If you cannot "
-                "identify it, reply asking for clarification and create an alert for the superintendent."
-            )
-        run_agent("reply_processor", msg)
+            try:
+                httpx.post(
+                    f"http://localhost:{port}/api/agent/process-reply",
+                    json={
+                        "from_email": reply["from_email"],
+                        "subject": reply["subject"],
+                        "body": reply["body"],
+                    },
+                    timeout=120.0,
+                )
+            except Exception as e:
+                print(f"[POLL] Error processing reply: {e}")
+
+
+def scheduled_simulate_replies():
+    """Auto-generate contractor replies for any unreplied outbound emails."""
+    try:
+        from simulate_replies import run_once
+        run_once()
+    except Exception as e:
+        print(f"[SIM] Error in auto-reply: {e}")
 
 
 def scheduled_daily_status_sweep():
@@ -66,12 +80,18 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     print("Scheduler started: daily status sweep at 8am.")
 
-    # Start Gmail polling if configured
-    gmail_user = os.getenv("GMAIL_USER")
-    gmail_pass = os.getenv("GMAIL_APP_PASSWORD")
-    if gmail_user and gmail_pass and not gmail_pass.startswith("xxxx"):
-        scheduler.add_job(scheduled_poll_emails, "interval", minutes=5, id="poll_emails")
-        print("Gmail polling enabled: every 5 minutes.")
+    # Auto-generate contractor replies (simulator) — runs first, writes inbound emails to DB
+    scheduler.add_job(scheduled_simulate_replies, "interval", seconds=30, id="simulate_replies")
+    print("Auto-reply simulator enabled: every 30 seconds.")
+
+    # Poll DB for inbound emails — runs after simulator, picks up replies and processes them
+    # Offset by 10s so simulator writes first, then poller reads
+    from datetime import datetime, timedelta
+    scheduler.add_job(
+        scheduled_poll_emails, "interval", seconds=30, id="poll_emails",
+        next_run_time=datetime.now() + timedelta(seconds=15),
+    )
+    print("Inbound email polling enabled: every 30 seconds (offset 15s from simulator).")
 
     yield
 
@@ -157,13 +177,14 @@ def project_detail_page(project_id: int, request: Request, db: Session = Depends
             threads[key] = {
                 "task_id": e.task_id,
                 "task_name": task.name if task else "Unknown Task",
+                "task_sequence_order": task.sequence_order if task else 9999,
                 "contractor_name": contractor.name if contractor else "Unknown",
                 "contractor_email": contractor.email if contractor else "",
                 "emails": [],
             }
         threads[key]["emails"].append(e)
 
-    email_threads = sorted(threads.values(), key=lambda t: t["emails"][-1].created_at, reverse=True)
+    email_threads = sorted(threads.values(), key=lambda t: t["task_sequence_order"])
 
     # Fetch termination flows for this project
     termination_flows = (

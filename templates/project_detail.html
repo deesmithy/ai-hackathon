@@ -252,9 +252,10 @@
         </div>
         <!-- Legend -->
         <div class="px-6 py-3 border-t border-surface-100 flex flex-wrap items-center gap-4 text-xs text-surface-500">
-            <div class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded bg-sky-100 border border-sky-300"></span><span>Start</span></div>
-            <div class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded bg-emerald-100 border border-emerald-300"></span><span>End</span></div>
+            <div class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded bg-sky-100 border border-sky-300"></span><span>Confirmed</span></div>
+            <div class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded bg-sky-50 border border-dashed border-sky-300"></span><span>Tentative</span></div>
             <div class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded bg-violet-100 border border-violet-300"></span><span>In Progress</span></div>
+            <div class="flex items-center space-x-1.5"><span class="w-3 h-3 rounded bg-emerald-100 border border-emerald-300"></span><span>Complete</span></div>
         </div>
     </div>
     <script>
@@ -268,6 +269,7 @@
                 end: {{ t.scheduled_end.isoformat() | tojson if t.scheduled_end else 'null' }},
                 status: {{ t.status | tojson }},
                 contractor: {{ (t.contractor_name or 'Unassigned') | tojson }},
+                datesConfirmed: {{ 'true' if t.dates_confirmed else 'false' }},
             },
             {% endfor %}
         ];
@@ -277,6 +279,9 @@
             end: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
             mid: 'bg-violet-100 text-violet-700 border border-violet-200',
             complete: 'bg-emerald-50 text-emerald-600 border border-emerald-200',
+            start_tentative: 'bg-sky-50 text-sky-500 border border-dashed border-sky-300',
+            end_tentative: 'bg-emerald-50 text-emerald-500 border border-dashed border-emerald-300',
+            mid_tentative: 'bg-violet-50 text-violet-500 border border-dashed border-violet-300',
         };
 
         return {
@@ -325,12 +330,14 @@
                     const e = t.end || t.start;
                     if (dateStr < s || dateStr > e) continue;
 
+                    const tentative = !t.datesConfirmed && t.status !== 'complete';
                     let colorKey = 'mid';
                     let label = t.name;
                     if (t.status === 'complete') colorKey = 'complete';
-                    else if (dateStr === s && dateStr === e) { colorKey = 'start'; }
-                    else if (dateStr === s) { colorKey = 'start'; label = '▸ ' + t.name; }
-                    else if (dateStr === e) { colorKey = 'end'; label = t.name + ' ▪'; }
+                    else if (dateStr === s && dateStr === e) { colorKey = tentative ? 'start_tentative' : 'start'; }
+                    else if (dateStr === s) { colorKey = tentative ? 'start_tentative' : 'start'; label = '▸ ' + t.name; }
+                    else if (dateStr === e) { colorKey = tentative ? 'end_tentative' : 'end'; label = t.name + ' ▪'; }
+                    else if (tentative) { colorKey = 'mid_tentative'; }
 
                     results.push({ id: t.id, name: t.name, label, contractor: t.contractor, color: statusColors[colorKey] });
                 }

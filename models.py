@@ -54,6 +54,7 @@ class Task(Base):
     estimated_days = Column(Integer, nullable=True)
     scheduled_start = Column(Date, nullable=True)
     scheduled_end = Column(Date, nullable=True)
+    dates_confirmed = Column(Boolean, default=False)
     actual_start = Column(Date, nullable=True)
     actual_end = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -77,6 +78,7 @@ class Email(Base):
     resend_id = Column(String, nullable=True)
     from_email = Column(String, nullable=True)
     to_email = Column(String, nullable=True)
+    processed = Column(Boolean, default=False)  # For inbound: has the reply_processor handled this?
     created_at = Column(DateTime, default=datetime.utcnow)
 
     task = relationship("Task", back_populates="emails")

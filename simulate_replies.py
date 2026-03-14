@@ -1,22 +1,17 @@
 """
-Contractor Reply Simulator — for demo purposes.
+Contractor Reply Simulator — DB-based mock email system.
 
-Logs into the subcontractor Gmail (GMAIL_SUB_EMAIL / GMAIL_SUB_PASSWORD),
-reads unread outreach emails from Superintendent AI, and sends back
-realistic human replies using Claude.
+Reads unreplied outbound emails from the database, generates realistic
+contractor replies using Claude, and writes them back as inbound emails.
+The superintendent's poller picks them up from DB automatically.
 
-Run manually:   python simulate_replies.py
-Run once:       python simulate_replies.py --once
+Run:        .venv/bin/python simulate_replies.py
+One pass:   .venv/bin/python simulate_replies.py --once
 """
 import os
-import re
 import sys
 import time
-import smtplib
-import imaplib
-import email as email_lib
-from email.mime.text import MIMEText
-from email.header import decode_header
+import random
 from datetime import datetime
 
 import anthropic
@@ -24,18 +19,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Config ---
-SUB_EMAIL = os.getenv("GMAIL_SUB_EMAIL")
-SUB_PASSWORD = os.getenv("GMAIL_SUB_PASSWORD")
-SUPERINTENDENT_EMAIL = os.getenv("GMAIL_USER")  # The "from" address we expect
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 REPLY_PROMPT = """\
 You are role-playing as a real construction subcontractor who just received an \
-email from a superintendent AI system about a job. You are reading the email \
-below and writing a realistic, brief reply.
+email from a superintendent about a job. Write a realistic, brief reply.
 
 IMPORTANT RULES:
 - Write ONLY the email body text. No subject line, no headers, no "From:", etc.
@@ -44,14 +32,27 @@ IMPORTANT RULES:
 - Do NOT mention that you are an AI or that this is a simulation.
 - Do NOT include any email headers or metadata.
 
-RESPONSE TYPE (pick one based on the roll below):
+Your current schedule commitments:
+{schedule_info}
+
+You MUST pick EXACTLY ONE of these response types based on the roll AND your schedule:
 - Roll: {roll}/100
-- If roll <= 12: DECLINE the job. Give a brief, believable reason \
-  (already booked, scheduling conflict, too far away, etc.). Be polite.
-- If roll 13-25: ASK A QUESTION before committing. Ask about timeline, \
-  pay rate, materials, site access, scope, etc. One specific question.
-- If roll > 25: ACCEPT the job. Confirm availability, mention when you \
-  could start (within the next 1-2 weeks), and express enthusiasm naturally.
+
+**If this is a SCHEDULE CONFIRMATION email** (subject contains "Schedule Confirmation"):
+  - If the proposed dates overlap with your existing commitments above, you MUST counter-propose \
+    dates that don't conflict. Mention your existing commitment as the reason and suggest starting \
+    after it ends. Keep the same duration.
+  - If roll <= 15 and no conflicts: Counter-propose slightly different dates (e.g., start a few days later). \
+    Give a brief reason (wrapping up another small job, family obligation, etc.).
+  - Otherwise (no conflicts): Confirm the proposed dates. Say something like "Those dates work for me" \
+    or "I can make that schedule work."
+
+**If this is an INITIAL OUTREACH email** (not a schedule confirmation):
+  - If you have schedule conflicts with the dates mentioned in the email, mention you're booked \
+    during that period but could start after your current job ends. This overrides the roll.
+  - If roll <= 10: NOT AVAILABLE. Politely decline — give a brief believable reason.
+  - If roll 11-25: REQUEST MORE INFO. Ask ONE specific question before committing.
+  - If roll > 25: YES, I CAN DO THE JOB. Confirm you're available and sound naturally enthusiastic.
 
 The outreach email you received:
 ---
@@ -63,179 +64,178 @@ Body:
 Your reply (body text only):"""
 
 
-def fetch_unread_outreach() -> list[dict]:
-    """Fetch unread emails with [SUP-*] in subject from the sub inbox."""
-    if not SUB_EMAIL or not SUB_PASSWORD:
-        print("[SIM] GMAIL_SUB_EMAIL / GMAIL_SUB_PASSWORD not set, aborting.")
-        return []
+def get_unreplied_outbound():
+    """Find outbound emails that don't have a corresponding inbound reply yet."""
+    from database import SessionLocal
+    from models import Email
 
-    emails = []
+    db = SessionLocal()
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
-        mail.login(SUB_EMAIL, SUB_PASSWORD)
-        mail.select("inbox")
+        outbound = db.query(Email).filter(Email.direction == "outbound").order_by(Email.created_at).all()
+        inbound = db.query(Email).filter(Email.direction == "inbound").all()
 
-        # Only unread emails with SUP- in subject
-        _, message_numbers = mail.search(None, '(UNSEEN SUBJECT "SUP-")')
+        # For each outbound, check if there's an inbound with same task+contractor created after it
+        unreplied = []
+        for out in outbound:
+            has_reply = any(
+                inp.task_id == out.task_id
+                and inp.contractor_id == out.contractor_id
+                and inp.created_at > out.created_at
+                for inp in inbound
+            )
+            if not has_reply:
+                unreplied.append({
+                    "id": out.id,
+                    "task_id": out.task_id,
+                    "contractor_id": out.contractor_id,
+                    "subject": out.subject or "",
+                    "body": out.body or "",
+                    "to_email": out.to_email or "",
+                })
 
-        for num in message_numbers[0].split():
-            if not num:
-                continue
-            _, msg_data = mail.fetch(num, "(RFC822)")
-            msg = email_lib.message_from_bytes(msg_data[0][1])
-
-            # Decode subject
-            subject = ""
-            raw_subject = msg.get("Subject", "")
-            decoded_parts = decode_header(raw_subject)
-            for part, encoding in decoded_parts:
-                if isinstance(part, bytes):
-                    subject += part.decode(encoding or "utf-8")
-                else:
-                    subject += part
-
-            # Sender
-            from_addr = msg.get("From", "")
-            email_match = re.search(r"<(.+?)>", from_addr)
-            from_email = email_match.group(1) if email_match else from_addr
-
-            # Recipient (To header) — we need this to know which contractor alias
-            to_addr = msg.get("To", "")
-            to_match = re.search(r"<(.+?)>", to_addr)
-            to_email = to_match.group(1) if to_match else to_addr
-
-            # Extract the contractor display name from the To header
-            to_name_match = re.match(r"(.+?)\s*<", to_addr)
-            to_name = to_name_match.group(1).strip().strip('"') if to_name_match else ""
-
-            # Body
-            body = ""
-            if msg.is_multipart():
-                for part in msg.walk():
-                    if part.get_content_type() == "text/plain":
-                        body = part.get_payload(decode=True).decode("utf-8", errors="replace")
-                        break
-            else:
-                body = msg.get_payload(decode=True).decode("utf-8", errors="replace")
-
-            # Skip if this email was sent BY the sub account (avoid self-reply loop)
-            if from_email and SUB_EMAIL and from_email.lower().split("+")[0] == SUB_EMAIL.lower().split("+")[0]:
-                print(f"[SIM] Skipping self-sent email: {subject}")
-                mail.store(num, "+FLAGS", "\\Seen")
-                continue
-
-            # Also skip if it looks like a reply (Re: prefix) — don't chain
-            if subject.lower().startswith("re:"):
-                print(f"[SIM] Skipping reply-to-reply: {subject}")
-                mail.store(num, "+FLAGS", "\\Seen")
-                continue
-
-            emails.append({
-                "num": num,
-                "from_email": from_email,
-                "to_email": to_email,
-                "to_name": to_name,
-                "subject": subject,
-                "body": body.strip(),
-            })
-
-            # Mark as read
-            mail.store(num, "+FLAGS", "\\Seen")
-
-        mail.logout()
-    except Exception as e:
-        print(f"[SIM ERROR] IMAP: {e}")
-
-    return emails
+        return unreplied
+    finally:
+        db.close()
 
 
-def generate_reply(subject: str, body: str) -> str:
-    """Use Claude to generate a realistic contractor reply."""
-    import random
+def get_contractor_info(contractor_id):
+    """Get contractor name and email from DB."""
+    from database import SessionLocal
+    from models import Contractor
+
+    db = SessionLocal()
+    try:
+        c = db.query(Contractor).filter(Contractor.id == contractor_id).first()
+        if c:
+            return {"name": c.name, "email": c.email}
+        return {"name": "Contractor", "email": ""}
+    finally:
+        db.close()
+
+
+def get_contractor_commitments(contractor_id: int) -> list[dict]:
+    """Look up existing schedule commitments for a contractor."""
+    from database import SessionLocal
+    from models import Contractor, OutreachQueue, Task
+
+    db = SessionLocal()
+    try:
+        entries = db.query(OutreachQueue).filter(
+            OutreachQueue.contractor_id == contractor_id,
+            OutreachQueue.status.in_(["accepted", "sent"]),
+        ).all()
+
+        commitments = []
+        for e in entries:
+            task = db.query(Task).get(e.task_id)
+            if task and task.status in ("committed", "in_progress") and task.scheduled_start:
+                commitments.append({
+                    "start": str(task.scheduled_start),
+                    "end": str(task.scheduled_end) if task.scheduled_end else str(task.scheduled_start),
+                    "task_name": task.name,
+                })
+        return commitments
+    finally:
+        db.close()
+
+
+def generate_reply(subject: str, body: str, contractor_id: int | None = None) -> tuple[str, str]:
+    """Use Claude to generate a realistic contractor reply. Returns (reply_text, response_type)."""
     roll = random.randint(1, 100)
+    response_type = "NOT AVAILABLE" if roll <= 10 else "MORE INFO" if roll <= 25 else "YES"
+
+    commitments = get_contractor_commitments(contractor_id) if contractor_id else []
+    if commitments:
+        schedule_info = "\n".join(
+            f"- {c['task_name']}: {c['start']} to {c['end']}" for c in commitments
+        )
+    else:
+        schedule_info = "You have no current commitments."
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
         messages=[{
             "role": "user",
-            "content": REPLY_PROMPT.format(roll=roll, subject=subject, body=body),
+            "content": REPLY_PROMPT.format(roll=roll, subject=subject, body=body, schedule_info=schedule_info),
         }],
     )
 
     reply_text = response.content[0].text.strip()
-    print(f"[SIM] Roll={roll} → {'DECLINE' if roll <= 12 else 'QUESTION' if roll <= 25 else 'ACCEPT'}")
-    return reply_text
+    has_conflicts = len(commitments) > 0
+    print(f"    Roll={roll}, Commitments={len(commitments)} → {response_type}{' (has schedule conflicts!)' if has_conflicts else ''}")
+    return reply_text, response_type
 
 
-def send_reply(to_email: str, from_alias: str, from_name: str, subject: str, body: str):
-    """Send a reply from the sub Gmail account using the plus-alias as the From."""
-    msg = MIMEText(body, _charset="utf-8")
-    msg["Subject"] = f"Re: {subject}"
-    msg["From"] = f"{from_name} <{from_alias}>"
-    msg["To"] = to_email
-    msg["In-Reply-To"] = ""  # Could track message-id but not needed for demo
+def save_inbound_email(task_id, contractor_id, subject, body, from_email):
+    """Write an inbound email to the DB. The superintendent's poller will pick it up."""
+    from database import SessionLocal
+    from models import Email
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(SUB_EMAIL, SUB_PASSWORD)
-        server.send_message(msg)
-
-    print(f"[SIM] Replied as {from_name} <{from_alias}> → {to_email}")
+    db = SessionLocal()
+    try:
+        email = Email(
+            task_id=task_id,
+            contractor_id=contractor_id,
+            direction="inbound",
+            subject=f"Re: {subject}",
+            body=body,
+            from_email=from_email,
+            processed=False,
+        )
+        db.add(email)
+        db.commit()
+    finally:
+        db.close()
 
 
 def run_once():
-    """One pass: fetch unread outreach, generate replies, send them."""
-    emails = fetch_unread_outreach()
-    if not emails:
-        print("[SIM] No new outreach emails found.")
+    """One pass: find unreplied outbound emails, generate and save replies."""
+    unreplied = get_unreplied_outbound()
+    if not unreplied:
+        print("[SIM] No unreplied outbound emails.")
         return 0
 
-    print(f"[SIM] Found {len(emails)} outreach email(s) to reply to.\n")
+    print(f"[SIM] Found {len(unreplied)} unreplied outbound email(s).\n")
 
-    for e in emails:
-        print(f"  Processing: {e['subject']}")
-        print(f"    To: {e['to_name']} <{e['to_email']}>")
+    for e in unreplied:
+        contractor = get_contractor_info(e["contractor_id"])
+        print(f"  {contractor['name']} — {e['subject'][:70]}")
 
         try:
-            reply_body = generate_reply(e["subject"], e["body"])
+            reply_body, response_type = generate_reply(e["subject"], e["body"], e["contractor_id"])
             print(f"    Reply: {reply_body[:100]}...")
 
-            send_reply(
-                to_email=e["from_email"],        # Reply to superintendent
-                from_alias=e["to_email"],         # Use the plus-alias the email was sent to
-                from_name=e["to_name"] or "Contractor",
+            save_inbound_email(
+                task_id=e["task_id"],
+                contractor_id=e["contractor_id"],
                 subject=e["subject"],
                 body=reply_body,
+                from_email=contractor["email"],
             )
-            print()
+            print(f"    Saved to DB.\n")
         except Exception as ex:
             print(f"    ERROR: {ex}\n")
 
-    return len(emails)
+    return len(unreplied)
 
 
 def main():
     print("=" * 60)
-    print("  Contractor Reply Simulator")
+    print("  Contractor Reply Simulator (DB-based)")
     print("=" * 60)
-    print(f"  Sub account:   {SUB_EMAIL}")
-    print(f"  Superintendent: {SUPERINTENDENT_EMAIL}")
     print()
-
-    if not SUB_EMAIL or not SUB_PASSWORD:
-        print("ERROR: GMAIL_SUB_EMAIL and GMAIL_SUB_PASSWORD must be set in .env")
-        sys.exit(1)
 
     if "--once" in sys.argv:
         count = run_once()
-        print(f"\nDone. Replied to {count} email(s).")
+        print(f"Done. Generated {count} reply/replies.")
     else:
-        print("Running in loop mode (checks every 30 seconds). Ctrl+C to stop.\n")
+        print("Running in loop mode (checks every 10 seconds). Ctrl+C to stop.\n")
         try:
             while True:
                 run_once()
-                print(f"--- Sleeping 30s (next check at {datetime.now().strftime('%H:%M:%S')}) ---\n")
-                time.sleep(30)
+                print(f"--- Next check in 10s ---\n")
+                time.sleep(10)
         except KeyboardInterrupt:
             print("\nStopped.")
 

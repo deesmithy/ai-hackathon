@@ -26,7 +26,13 @@ async def create_project(
     uploaded_file_content = None
     if file:
         raw = await file.read()
-        uploaded_file_content = raw.decode("utf-8", errors="ignore")
+        if file.filename and file.filename.lower().endswith(".pdf"):
+            import fitz
+            doc = fitz.open(stream=raw, filetype="pdf")
+            uploaded_file_content = "\n".join(page.get_text() for page in doc)
+            doc.close()
+        else:
+            uploaded_file_content = raw.decode("utf-8", errors="ignore")
 
     project = Project(
         name=name,

@@ -90,6 +90,103 @@ def _save_tasks_from_dicts(db, project_id: int, task_dicts: list[dict]) -> list[
     ]
 
 
+def _auto_schedule_tasks(db: Session, project_id: int):
+    """Compute scheduled_start and scheduled_end for all tasks based on dependencies and estimated_days."""
+    from datetime import date, timedelta
+
+    tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.sequence_order).all()
+    project = db.query(Project).filter(Project.id == project_id).first()
+    base_date = project.start_date if project and project.start_date else date.today()
+
+    # Build lookup: task_id -> task
+    task_map = {t.id: t for t in tasks}
+    # Track computed end dates
+    end_dates = {}
+
+    for t in tasks:
+        est = t.estimated_days or 5
+        if t.depends_on_task and t.depends_on_task in end_dates:
+            # Start the day after the dependency ends
+            start = end_dates[t.depends_on_task] + timedelta(days=1)
+        else:
+            start = base_date
+        end = start + timedelta(days=est - 1)
+
+        t.scheduled_start = start
+        t.scheduled_end = end
+        end_dates[t.id] = end
+
+    # Update project target_end_date if not set
+    if project and end_dates and not project.target_end_date:
+        project.target_end_date = max(end_dates.values())
+
+    db.commit()
+
+
+def _reschedule_downstream(db: Session, changed_task_id: int):
+    """When a task's dates change, cascade-update all downstream tasks that haven't confirmed dates yet."""
+    from datetime import timedelta
+
+    changed = db.query(Task).filter(Task.id == changed_task_id).first()
+    if not changed or not changed.scheduled_end:
+        return
+
+    # Walk the dependency chain forward
+    queue = [changed_task_id]
+    rescheduled = []
+    while queue:
+        parent_id = queue.pop(0)
+        parent = db.query(Task).filter(Task.id == parent_id).first()
+        if not parent or not parent.scheduled_end:
+            continue
+
+        dependents = db.query(Task).filter(Task.depends_on_task == parent_id).all()
+        for dep in dependents:
+            # Only reschedule if dates aren't already confirmed by the contractor
+            if dep.dates_confirmed:
+                continue
+            est = dep.estimated_days or 5
+            new_start = parent.scheduled_end + timedelta(days=1)
+            new_end = new_start + timedelta(days=est - 1)
+
+            if dep.scheduled_start != new_start or dep.scheduled_end != new_end:
+                dep.scheduled_start = new_start
+                dep.scheduled_end = new_end
+                rescheduled.append(dep)
+                queue.append(dep.id)
+
+    if rescheduled:
+        db.commit()
+        names = ", ".join(f"'{t.name}'" for t in rescheduled)
+        print(f"[RESCHEDULE] Updated dates for {len(rescheduled)} downstream task(s): {names}")
+
+
+def _auto_assign_and_outreach(project_id: int, project_name: str):
+    """Chain: assign contractors → set project active → send outreach emails."""
+    from database import SessionLocal
+
+    # Step 1: Assign contractors
+    assign_msg = f"Assign contractors to all unassigned tasks for project ID {project_id} ({project_name})."
+    run_agent("contractor_assigner", assign_msg)
+
+    # Step 2: Set project to active
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if project and project.status == "planning":
+            project.status = "active"
+            db.commit()
+    finally:
+        db.close()
+
+    # Step 3: Send outreach emails
+    outreach_msg = (
+        f"Send outreach emails for all assigned tasks in project ID {project_id} ({project_name}). "
+        f"Only send to tasks with status 'assigned' that haven't been emailed yet."
+    )
+    run_agent("email_drafter", outreach_msg)
+
+
 @router.post("/generate-plan")
 def generate_plan(data: GeneratePlanRequest, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == data.project_id).first()
@@ -99,6 +196,11 @@ def generate_plan(data: GeneratePlanRequest, db: Session = Depends(get_db)):
     user_msg = _build_plan_user_msg(project)
     task_dicts = generate_tasks_direct(user_msg)
     task_list = _save_tasks_from_dicts(db, project.id, task_dicts)
+    _auto_schedule_tasks(db, project.id)
+
+    # Automatically assign contractors and send outreach
+    _auto_assign_and_outreach(project.id, project.name)
+
     return {"project_id": project.id, "tasks": task_list}
 
 
@@ -118,6 +220,11 @@ def regenerate_tasks(data: RegenerateTasksRequest, db: Session = Depends(get_db)
     user_msg += f"\nUser feedback: {data.feedback}\nPlease revise accordingly."
     task_dicts = generate_tasks_direct(user_msg)
     task_list = _save_tasks_from_dicts(db, project.id, task_dicts)
+    _auto_schedule_tasks(db, project.id)
+
+    # Automatically assign contractors and send outreach
+    _auto_assign_and_outreach(project.id, project.name)
+
     return {"project_id": project.id, "tasks": task_list}
 
 
@@ -153,6 +260,13 @@ def reassign_contractors(data: ReassignContractorsRequest, db: Session = Depends
         f"\nUser feedback: {data.feedback}\nPlease revise accordingly."
     )
     run_agent("contractor_assigner", user_msg)
+
+    # Automatically send outreach to newly assigned contractors
+    outreach_msg = (
+        f"Send outreach emails for all assigned tasks in project ID {project.id} ({project.name}). "
+        f"Only send to tasks with status 'assigned' that haven't been emailed yet."
+    )
+    run_agent("email_drafter", outreach_msg)
 
     return {"project_id": project.id, "assignments": _build_assignment_list(db, project.id)}
 
@@ -213,18 +327,25 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
         if task:
             user_msg += f"\nThis is regarding task ID {task_id} ({task.name}) in project ID {task.project_id}."
 
-            # Log the inbound email
+            # Log the inbound email (skip if already exists from simulator)
             contractor = get_contractor_by_email(db, data.from_email)
-            inbound = Email(
-                task_id=task_id,
-                contractor_id=contractor.id if contractor else None,
-                direction="inbound",
-                subject=data.subject,
-                body=data.body,
-                from_email=data.from_email,
-            )
-            db.add(inbound)
-            db.commit()
+            existing = db.query(Email).filter(
+                Email.direction == "inbound",
+                Email.task_id == task_id,
+                Email.from_email == data.from_email,
+                Email.body == data.body,
+            ).first()
+            if not existing:
+                inbound = Email(
+                    task_id=task_id,
+                    contractor_id=contractor.id if contractor else None,
+                    direction="inbound",
+                    subject=data.subject,
+                    body=data.body,
+                    from_email=data.from_email,
+                )
+                db.add(inbound)
+                db.commit()
 
             # Check for an active termination flow for this task
             term_flow = db.query(TerminationFlow).filter(
@@ -238,11 +359,134 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
                     f"call advance_termination_flow({term_flow.id}, 'replacement_confirmed')."
                 )
 
-    result = run_agent("reply_processor", user_msg)
-
-    # After reply processing, check if a flow was just confirmed → run executor stage 2
+    # Snapshot task state BEFORE processing to detect what changed
+    pre_status = None
+    pre_dates_confirmed = None
     if task_match:
         task_id = int(task_match.group(1))
+        pre_task = db.query(Task).filter(Task.id == task_id).first()
+        if pre_task:
+            pre_status = pre_task.status
+            pre_dates_confirmed = pre_task.dates_confirmed
+
+    result = run_agent("reply_processor", user_msg)
+
+    # After reply processing, check for post-processing actions
+    if task_match:
+        task_id = int(task_match.group(1))
+
+        # --- Detect what changed ---
+        db.expire_all()
+        task_after = db.query(Task).filter(Task.id == task_id).first()
+        status_changed = task_after and task_after.status != pre_status
+        dates_just_confirmed = task_after and task_after.dates_confirmed and not pre_dates_confirmed
+
+        # --- Helper: find the contractor for this task ---
+        def _get_task_contractor(tid):
+            oq = db.query(OutreachQueue).filter(
+                OutreachQueue.task_id == tid,
+                OutreachQueue.status.in_(["sent", "accepted"]),
+            ).first()
+            if oq:
+                return db.query(Contractor).filter(Contractor.id == oq.contractor_id).first()
+            return get_contractor_by_email(db, data.from_email)
+
+        # --- 1. Question / no state change → auto-respond with followup ---
+        if task_after and not status_changed and not dates_just_confirmed:
+            contractor = _get_task_contractor(task_id)
+            project = db.query(Project).filter(Project.id == task_after.project_id).first()
+            if contractor and project:
+                run_agent(
+                    "followup_responder",
+                    f"A contractor replied with a question or comment that needs a response.\n"
+                    f"Contractor: {contractor.name} (email: {contractor.email}, ID: {contractor.id})\n"
+                    f"Task: {task_after.name} (ID: {task_id}), Project: {project.name} (ID: {project.id})\n"
+                    f"Their message:\n{data.body}\n\n"
+                    f"Read the email thread, understand their question, and send a helpful reply."
+                )
+                print(f"[FOLLOWUP] Auto-responded to question on task {task_id}")
+
+        # --- 2. Date counter-proposal was rejected (dates NOT confirmed, but reply was about dates) ---
+        if task_after and task_after.status == "committed" and not task_after.dates_confirmed and pre_status == "committed":
+            # Check if a new alert about date conflict was just created
+            from sqlalchemy import desc
+            recent_alert = db.query(Alert).filter(
+                Alert.task_id == task_id,
+                Alert.message.ilike("%conflict%"),
+            ).order_by(desc(Alert.created_at)).first()
+            if recent_alert:
+                contractor = _get_task_contractor(task_id)
+                project = db.query(Project).filter(Project.id == task_after.project_id).first()
+                if contractor and project:
+                    run_agent(
+                        "followup_responder",
+                        f"A contractor counter-proposed dates that conflict with project constraints.\n"
+                        f"Contractor: {contractor.name} (email: {contractor.email}, ID: {contractor.id})\n"
+                        f"Task: {task_after.name} (ID: {task_id}), Project: {project.name} (ID: {project.id})\n"
+                        f"Their message:\n{data.body}\n\n"
+                        f"Explain why their proposed dates don't work (check dependencies), "
+                        f"suggest valid alternatives, and ask them to confirm."
+                    )
+                    print(f"[FOLLOWUP] Explained date conflict on task {task_id}")
+
+        # --- 3. Reschedule downstream if dates changed ---
+        db.expire_all()
+        task_for_dates = db.query(Task).filter(Task.id == task_id).first()
+        if task_for_dates and (task_for_dates.scheduled_start or task_for_dates.scheduled_end):
+            _reschedule_downstream(db, task_id)
+
+        # --- 4. Date negotiation cascade ---
+        db.expire_all()
+        task_for_dates = db.query(Task).filter(Task.id == task_id).first()
+        if task_for_dates:
+            # After acceptance: if task is committed + dates not confirmed + upstream confirmed → trigger date negotiator
+            if task_for_dates.status == "committed" and not task_for_dates.dates_confirmed and pre_status != "committed":
+                upstream_ok = True
+                if task_for_dates.depends_on_task:
+                    upstream = db.query(Task).filter(Task.id == task_for_dates.depends_on_task).first()
+                    if upstream and not upstream.dates_confirmed:
+                        upstream_ok = False
+                if upstream_ok:
+                    project = db.query(Project).filter(Project.id == task_for_dates.project_id).first()
+                    outreach = db.query(OutreachQueue).filter(
+                        OutreachQueue.task_id == task_id, OutreachQueue.status == "sent"
+                    ).first()
+                    contractor = db.query(Contractor).filter(Contractor.id == outreach.contractor_id).first() if outreach else None
+                    if contractor and project:
+                        run_agent(
+                            "date_negotiator",
+                            f"Propose scheduled dates to contractor {contractor.name} (email: {contractor.email}, "
+                            f"contractor ID: {contractor.id}) for task ID {task_id} ({task_for_dates.name}) "
+                            f"in project ID {project.id} ({project.name}). "
+                            f"Scheduled: {task_for_dates.scheduled_start} to {task_for_dates.scheduled_end}."
+                        )
+                        print(f"[DATE-NEGOTIATION] Triggered for task {task_id} ({task_for_dates.name})")
+
+            # After date confirmation: find downstream tasks that are committed + dates not confirmed → trigger
+            if dates_just_confirmed:
+                downstream_tasks = db.query(Task).filter(
+                    Task.depends_on_task == task_id,
+                    Task.status == "committed",
+                    Task.dates_confirmed == False,
+                ).all()
+                for dt in downstream_tasks:
+                    project = db.query(Project).filter(Project.id == dt.project_id).first()
+                    dt_outreach = db.query(OutreachQueue).filter(
+                        OutreachQueue.task_id == dt.id, OutreachQueue.status == "sent"
+                    ).first()
+                    dt_contractor = db.query(Contractor).filter(Contractor.id == dt_outreach.contractor_id).first() if dt_outreach else None
+                    if dt_contractor and project:
+                        run_agent(
+                            "date_negotiator",
+                            f"Propose scheduled dates to contractor {dt_contractor.name} (email: {dt_contractor.email}, "
+                            f"contractor ID: {dt_contractor.id}) for task ID {dt.id} ({dt.name}) "
+                            f"in project ID {project.id} ({project.name}). "
+                            f"Scheduled: {dt.scheduled_start} to {dt.scheduled_end}. "
+                            f"Upstream task '{task_for_dates.name}' dates are now confirmed through {task_for_dates.scheduled_end}."
+                        )
+                        print(f"[DATE-NEGOTIATION] Cascade triggered for downstream task {dt.id} ({dt.name})")
+
+        # Check if a termination flow was just confirmed → run executor stage 2
         confirmed_flow = db.query(TerminationFlow).filter(
             TerminationFlow.task_id == task_id,
             TerminationFlow.status == "replacement_confirmed",
@@ -253,6 +497,66 @@ def process_reply(data: ProcessReplyRequest, db: Session = Depends(get_db)):
                 "termination_executor",
                 f"Execute stage 2: send termination notice and confirm new contract for termination flow ID {confirmed_flow.id}."
             )
+
+        # Check if contractor declined → auto-assign next contractor and send outreach
+        db.expire_all()
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if task and task.status == "assigned":
+            # The reply processor sets status back to 'assigned' on decline.
+            # Check if the declining contractor's outreach was marked declined.
+            declined = db.query(OutreachQueue).filter(
+                OutreachQueue.task_id == task_id,
+                OutreachQueue.status == "declined",
+            ).first()
+            if not declined:
+                # Also check: if status is 'assigned' but contractor just replied,
+                # this was likely a decline that reset the status
+                contractor = get_contractor_by_email(db, data.from_email)
+                if contractor:
+                    oq = db.query(OutreachQueue).filter(
+                        OutreachQueue.task_id == task_id,
+                        OutreachQueue.contractor_id == contractor.id,
+                    ).first()
+                    if oq:
+                        oq.status = "declined"
+                        db.commit()
+                        declined = oq
+
+            if declined:
+                # Find next available contractor for this specialty
+                from services.contractor_service import get_contractors_by_specialty
+                already_tried = [
+                    o.contractor_id for o in
+                    db.query(OutreachQueue).filter(OutreachQueue.task_id == task_id).all()
+                ]
+                candidates = get_contractors_by_specialty(db, task.specialty_needed)
+                next_contractor = next(
+                    (c for c in candidates if c.id not in already_tried), None
+                )
+
+                # If everyone's been tried, cycle back to the top of the list
+                if not next_contractor and candidates:
+                    next_contractor = candidates[0]
+
+                if next_contractor:
+                    # Assign and send outreach to the replacement
+                    new_entry = OutreachQueue(
+                        task_id=task_id,
+                        contractor_id=next_contractor.id,
+                        priority_order=len(already_tried) + 1,
+                    )
+                    db.add(new_entry)
+                    db.commit()
+
+                    project = db.query(Project).filter(Project.id == task.project_id).first()
+                    run_agent(
+                        "email_drafter",
+                        f"Send an outreach email for task ID {task_id} ({task.name}) in project "
+                        f"ID {project.id} ({project.name}) to contractor {next_contractor.name} "
+                        f"(email: {next_contractor.email}, contractor ID: {next_contractor.id}). "
+                        f"The previous contractor declined, so we need this replacement."
+                    )
+                    print(f"[AUTO-ESCALATION] Task {task_id}: {declined.contractor_id} declined → outreach sent to {next_contractor.name}")
 
     return {"result": result}
 

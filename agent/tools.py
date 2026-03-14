@@ -30,6 +30,7 @@ def get_project_context(project_id: int) -> dict:
                 "estimated_days": t.estimated_days,
                 "scheduled_start": str(t.scheduled_start) if t.scheduled_start else None,
                 "scheduled_end": str(t.scheduled_end) if t.scheduled_end else None,
+                "dates_confirmed": t.dates_confirmed,
                 "actual_start": str(t.actual_start) if t.actual_start else None,
                 "actual_end": str(t.actual_end) if t.actual_end else None,
                 "outreach": [
@@ -173,27 +174,73 @@ def send_email(to_email: str, to_name: str, subject: str, body: str,
 
 
 def update_task_status(task_id: int, status: str, scheduled_start: str | None = None,
-                       scheduled_end: str | None = None, notes: str | None = None) -> dict:
+                       scheduled_end: str | None = None, notes: str | None = None,
+                       dates_confirmed: bool | None = None) -> dict:
     """Update a task's status and optionally its dates."""
     db = SessionLocal()
     try:
         task = db.query(Task).get(task_id)
         if not task:
             return {"error": f"Task {task_id} not found"}
+
+        dates_changed = False
         task.status = status
         if scheduled_start:
-            task.scheduled_start = date.fromisoformat(scheduled_start)
+            new_start = date.fromisoformat(scheduled_start)
+            if task.scheduled_start != new_start:
+                dates_changed = True
+            task.scheduled_start = new_start
         if scheduled_end:
-            task.scheduled_end = date.fromisoformat(scheduled_end)
+            new_end = date.fromisoformat(scheduled_end)
+            if task.scheduled_end != new_end:
+                dates_changed = True
+            task.scheduled_end = new_end
+        if dates_confirmed is not None:
+            task.dates_confirmed = dates_confirmed
         if status == "in_progress" and not task.actual_start:
             task.actual_start = date.today()
         if status == "complete" and not task.actual_end:
             task.actual_end = date.today()
         task.updated_at = datetime.utcnow()
         db.commit()
-        return {"task_id": task_id, "status": status}
+
+        # If dates changed, cascade-reschedule unconfirmed downstream tasks
+        if dates_changed:
+            _reschedule_downstream_from_tool(db, task_id)
+
+        return {"task_id": task_id, "status": status, "dates_confirmed": task.dates_confirmed}
     finally:
         db.close()
+
+
+def _reschedule_downstream_from_tool(db, changed_task_id: int):
+    """When a task's dates change via tool call, update downstream unconfirmed tasks."""
+    from datetime import timedelta
+
+    changed = db.query(Task).get(changed_task_id)
+    if not changed or not changed.scheduled_end:
+        return
+
+    queue = [changed_task_id]
+    while queue:
+        parent_id = queue.pop(0)
+        parent = db.query(Task).get(parent_id)
+        if not parent or not parent.scheduled_end:
+            continue
+
+        dependents = db.query(Task).filter(Task.depends_on_task == parent_id).all()
+        for dep in dependents:
+            if dep.dates_confirmed:
+                continue
+            est = dep.estimated_days or 5
+            new_start = parent.scheduled_end + timedelta(days=1)
+            new_end = new_start + timedelta(days=est - 1)
+            if dep.scheduled_start != new_start or dep.scheduled_end != new_end:
+                dep.scheduled_start = new_start
+                dep.scheduled_end = new_end
+                queue.append(dep.id)
+
+    db.commit()
 
 
 def create_alert(project_id: int, alert_type: str, message: str, task_id: int | None = None) -> dict:
@@ -321,6 +368,41 @@ def get_termination_flow(flow_id: int) -> dict:
             "replacement_confirmed_at": str(flow.replacement_confirmed_at) if flow.replacement_confirmed_at else None,
             "termination_sent_at": str(flow.termination_sent_at) if flow.termination_sent_at else None,
             "created_at": str(flow.created_at),
+        }
+    finally:
+        db.close()
+
+
+def get_contractor_schedule(contractor_id: int) -> dict:
+    """Get a contractor's committed schedule across all projects."""
+    db = SessionLocal()
+    try:
+        entries = db.query(OutreachQueue).filter(
+            OutreachQueue.contractor_id == contractor_id,
+            OutreachQueue.status.in_(["accepted", "sent"]),
+        ).all()
+
+        commitments = []
+        for entry in entries:
+            task = db.query(Task).get(entry.task_id)
+            if task and task.status in ("committed", "in_progress") and task.scheduled_start and task.scheduled_end:
+                project = db.query(Project).get(task.project_id)
+                commitments.append({
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "project_id": task.project_id,
+                    "project_name": project.name if project else "Unknown",
+                    "scheduled_start": str(task.scheduled_start),
+                    "scheduled_end": str(task.scheduled_end),
+                    "dates_confirmed": task.dates_confirmed,
+                    "status": task.status,
+                })
+
+        contractor = db.query(Contractor).get(contractor_id)
+        return {
+            "contractor_id": contractor_id,
+            "contractor_name": contractor.name if contractor else "Unknown",
+            "commitments": sorted(commitments, key=lambda c: c["scheduled_start"]),
         }
     finally:
         db.close()
@@ -532,6 +614,7 @@ TOOL_DEFINITIONS = [
                 "status": {"type": "string", "enum": ["pending", "assigned", "outreach_sent", "committed", "in_progress", "complete", "blocked"]},
                 "scheduled_start": {"type": "string", "description": "ISO date string"},
                 "scheduled_end": {"type": "string", "description": "ISO date string"},
+                "dates_confirmed": {"type": "boolean", "description": "Whether the contractor has confirmed these dates"},
                 "notes": {"type": "string"},
             },
             "required": ["task_id", "status"],
@@ -600,6 +683,17 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "get_contractor_schedule",
+        "description": "Get a contractor's committed schedule (all tasks they are booked for) across all projects. Use this to check for date conflicts before proposing dates.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "contractor_id": {"type": "integer", "description": "The contractor ID"}
+            },
+            "required": ["contractor_id"],
+        },
+    },
+    {
         "name": "advance_termination_flow",
         "description": "Advance a termination flow to a new status.",
         "input_schema": {
@@ -665,6 +759,7 @@ TOOL_FUNCTIONS = {
     "update_project_status": update_project_status,
     "create_termination_flow": create_termination_flow,
     "get_termination_flow": get_termination_flow,
+    "get_contractor_schedule": get_contractor_schedule,
     "advance_termination_flow": advance_termination_flow,
     "get_outreach_queue": get_outreach_queue,
     "mark_outreach_status": mark_outreach_status,
