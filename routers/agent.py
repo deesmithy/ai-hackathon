@@ -393,14 +393,85 @@ def reassign_contractors(data: ReassignContractorsRequest, db: Session = Depends
     return {"project_id": project.id, "assignments": _build_assignment_list(db, project.id)}
 
 
+def _send_outreach_for_assigned(project_id: int, project_name: str):
+    """Send outreach emails for tasks that are assigned but not yet emailed."""
+    from database import SessionLocal
+    from datetime import datetime as _dt
+    from services.email_service import send_email_via_gmail
+    from models import AgentAction
+
+    email_drafts = assign_and_draft_direct(project_id, project_name)
+    draft_map = {d["task_id"]: d for d in email_drafts}
+
+    db = SessionLocal()
+    try:
+        tasks = db.query(Task).filter(
+            Task.project_id == project_id,
+            Task.status == "assigned",
+        ).all()
+
+        for task in tasks:
+            entry = db.query(OutreachQueue).filter(
+                OutreachQueue.task_id == task.id,
+                OutreachQueue.priority_order == 1,
+            ).first()
+            if not entry:
+                continue
+
+            draft = draft_map.get(task.id)
+            if not draft:
+                continue
+
+            subject = draft.get("subject", "").replace("\xa0", " ")
+            body = draft.get("body", "").replace("\xa0", " ")
+            contractor = db.query(Contractor).filter(Contractor.id == entry.contractor_id).first()
+            if not contractor:
+                continue
+
+            to_email = draft.get("to_email", contractor.email).replace("\xa0", "").strip()
+            to_name = draft.get("to_name", contractor.name).replace("\xa0", " ").strip()
+
+            resend_id = send_email_via_gmail(to_email, to_name, subject, body)
+
+            entry.status = "sent"
+            entry.sent_at = _dt.utcnow()
+            task.status = "outreach_sent"
+
+            db.add(Email(
+                task_id=task.id,
+                contractor_id=contractor.id,
+                direction="outbound",
+                subject=subject,
+                body=body,
+                to_email=to_email,
+                resend_id=resend_id,
+            ))
+            db.add(AgentAction(
+                project_id=project_id,
+                task_id=task.id,
+                agent_mode="email_drafter",
+                action_type="send_email",
+                description=f"Sent outreach to {to_name}: \"{subject}\"",
+            ))
+
+        db.commit()
+        print(f"[OUTREACH] Sent initial outreach for project {project_id}")
+    except Exception as e:
+        print(f"[OUTREACH] Error sending outreach: {e}")
+    finally:
+        db.close()
+
+
 @router.post("/confirm-assignments")
-def confirm_assignments(data: AssignContractorsRequest, db: Session = Depends(get_db)):
+def confirm_assignments(data: AssignContractorsRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == data.project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     project.status = "active"
     db.commit()
+
+    background_tasks.add_task(_send_outreach_for_assigned, project.id, project.name)
 
     return {"project_id": project.id, "status": project.status}
 
