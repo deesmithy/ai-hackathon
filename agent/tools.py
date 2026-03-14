@@ -178,7 +178,7 @@ def send_email(to_email: str, to_name: str, subject: str, body: str,
             ))
 
         task = db.query(Task).get(task_id)
-        if task:
+        if task and task.status not in ("committed", "in_progress", "complete"):
             task.status = "outreach_sent"
 
         db.commit()
