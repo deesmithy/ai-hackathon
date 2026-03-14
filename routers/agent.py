@@ -4,7 +4,7 @@ from datetime import datetime
 from database import get_db
 from models import Project, Email, Task, OutreachQueue, TerminationFlow, Contractor
 from schemas import GeneratePlanRequest, AssignContractorsRequest, RunOutreachRequest, CheckStatusRequest, ProcessReplyRequest, EvaluateTerminationRequest, ApproveTerminationRequest, CancelTerminationRequest, TerminationFlowOut, DemoTerminationRequest, RegenerateTasksRequest, ReassignContractorsRequest
-from agent.agent import run_agent, generate_tasks_direct
+from agent.agent import run_agent, generate_tasks_direct, assign_and_draft_direct
 from services.contractor_service import get_contractor_by_email
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -162,29 +162,72 @@ def _reschedule_downstream(db: Session, changed_task_id: int):
 
 
 def _auto_assign_and_outreach(project_id: int, project_name: str):
-    """Chain: assign contractors → set project active → send outreach emails."""
+    """Assign contractors and send outreach emails via a single structured API call."""
     from database import SessionLocal
+    from datetime import datetime as _dt
+    from services.email_service import send_email_via_gmail
+    from models import AgentAction
 
-    # Step 1: Assign contractors
-    assign_msg = f"Assign contractors to all unassigned tasks for project ID {project_id} ({project_name})."
-    run_agent("contractor_assigner", assign_msg)
+    assignments = assign_and_draft_direct(project_id, project_name)
 
-    # Step 2: Set project to active
     db = SessionLocal()
     try:
+        for a in assignments:
+            task = db.query(Task).get(a["task_id"])
+            contractor = db.query(Contractor).get(a["contractor_id"])
+            if not task or not contractor:
+                continue
+
+            # Skip if already assigned
+            existing = db.query(OutreachQueue).filter(
+                OutreachQueue.task_id == task.id,
+                OutreachQueue.contractor_id == contractor.id,
+            ).first()
+            if existing:
+                continue
+
+            entry = OutreachQueue(
+                task_id=task.id,
+                contractor_id=contractor.id,
+                priority_order=1,
+                status="sent",
+                sent_at=_dt.utcnow(),
+            )
+            db.add(entry)
+            task.status = "outreach_sent"
+
+            subject = a.get("subject", "").replace("\xa0", " ")
+            body = a.get("body", "").replace("\xa0", " ")
+            to_email = a.get("to_email", contractor.email).replace("\xa0", "").strip()
+            to_name = a.get("to_name", contractor.name).replace("\xa0", " ").strip()
+
+            resend_id = send_email_via_gmail(to_email, to_name, subject, body)
+
+            db.add(Email(
+                task_id=task.id,
+                contractor_id=contractor.id,
+                direction="outbound",
+                subject=subject,
+                body=body,
+                to_email=to_email,
+                resend_id=resend_id,
+            ))
+
+            db.add(AgentAction(
+                project_id=project_id,
+                task_id=task.id,
+                agent_mode="email_drafter",
+                action_type="send_email",
+                description=f"Sent email to {to_name}: \"{subject}\"",
+            ))
+
         project = db.query(Project).filter(Project.id == project_id).first()
         if project and project.status == "planning":
             project.status = "active"
-            db.commit()
+
+        db.commit()
     finally:
         db.close()
-
-    # Step 3: Send outreach emails
-    outreach_msg = (
-        f"Send outreach emails for all assigned tasks in project ID {project_id} ({project_name}). "
-        f"Only send to tasks with status 'assigned' that haven't been emailed yet."
-    )
-    run_agent("email_drafter", outreach_msg)
 
 
 @router.post("/generate-plan")
@@ -255,18 +298,7 @@ def reassign_contractors(data: ReassignContractorsRequest, db: Session = Depends
         t.status = "pending"
     db.commit()
 
-    user_msg = (
-        f"Assign contractors to all unassigned tasks for project ID {project.id} ({project.name})."
-        f"\nUser feedback: {data.feedback}\nPlease revise accordingly."
-    )
-    run_agent("contractor_assigner", user_msg)
-
-    # Automatically send outreach to newly assigned contractors
-    outreach_msg = (
-        f"Send outreach emails for all assigned tasks in project ID {project.id} ({project.name}). "
-        f"Only send to tasks with status 'assigned' that haven't been emailed yet."
-    )
-    run_agent("email_drafter", outreach_msg)
+    _auto_assign_and_outreach(project.id, project.name)
 
     return {"project_id": project.id, "assignments": _build_assignment_list(db, project.id)}
 

@@ -185,6 +185,74 @@ def generate_tasks_direct(user_message: str) -> list[dict]:
     return []
 
 
+def assign_and_draft_direct(project_id: int, project_name: str) -> list[dict]:
+    """Assign contractors and draft outreach emails in a single structured API call.
+
+    Returns a list of dicts: {task_id, contractor_id, to_email, to_name, subject, body}
+    """
+    from agent.tools import get_project_context, get_contractor_roster
+
+    ctx = get_project_context(project_id)
+    roster = get_contractor_roster()
+
+    submit_tool = {
+        "name": "submit_assignments",
+        "description": "Submit contractor assignments and outreach email drafts for all unassigned tasks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "assignments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task_id": {"type": "integer", "description": "Task ID from project context"},
+                            "contractor_id": {"type": "integer", "description": "Contractor ID from roster"},
+                            "to_name": {"type": "string", "description": "Contractor's full name"},
+                            "to_email": {"type": "string", "description": "Contractor's email address"},
+                            "subject": {"type": "string", "description": "Email subject — must start with [SUP-{task_id}]"},
+                            "body": {"type": "string", "description": "Professional outreach email body, under 150 words"},
+                        },
+                        "required": ["task_id", "contractor_id", "to_name", "to_email", "subject", "body"],
+                    },
+                }
+            },
+            "required": ["assignments"],
+        },
+    }
+
+    system_prompt = (
+        "You are a construction superintendent AI. Given project tasks and a contractor roster, "
+        "assign the best contractor to each unassigned task (match by specialty, rank by reliability + quality), "
+        "and draft a concise professional outreach email for each.\n\n"
+        "Email rules:\n"
+        "- Subject: [SUP-{task_id}] {task name} - {project name}\n"
+        "- Body: professional, friendly, under 150 words, include task details + timeline, ask for availability confirmation\n"
+        "- Assign every task that has status 'pending' or no contractor yet"
+    )
+
+    user_msg = (
+        f"Assign contractors and draft outreach emails for all unassigned tasks in '{project_name}' (ID: {project_id}).\n\n"
+        f"Project context:\n{json.dumps(ctx, default=str)}\n\n"
+        f"Contractor roster:\n{json.dumps(roster, default=str)}"
+    )
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=8192,
+        system=system_prompt,
+        tools=[submit_tool],
+        tool_choice={"type": "tool", "name": "submit_assignments"},
+        messages=[{"role": "user", "content": user_msg}],
+    )
+
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_assignments":
+            return block.input.get("assignments", [])
+
+    return []
+
+
 def run_agent(mode: str, user_message: str) -> str:
     """Run the Claude agent in a specific mode with an agentic tool-use loop."""
     config = MODE_CONFIG.get(mode)
