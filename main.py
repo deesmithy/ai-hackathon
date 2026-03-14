@@ -122,7 +122,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     for p in projects_list:
         p.task_count = db.query(Task).filter(Task.project_id == p.id).count()
 
-    alerts = db.query(Alert).filter(Alert.is_read == False).order_by(Alert.created_at.desc()).limit(10).all()
+    alerts = db.query(Alert).filter(Alert.is_read == False, Alert.alert_type != "risk").order_by(Alert.created_at.desc()).limit(10).all()
     return templates.TemplateResponse("index.html", {"request": request, "projects": projects_list, "alerts": alerts})
 
 
