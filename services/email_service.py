@@ -1,8 +1,10 @@
-"""Email service: Resend for outbound, Gmail IMAP for inbound."""
+"""Email service: Gmail SMTP for outbound, Gmail IMAP for inbound."""
 import os
 import re
+import smtplib
 import imaplib
 import email as email_lib
+from email.mime.text import MIMEText
 from email.header import decode_header
 from datetime import datetime
 from dotenv import load_dotenv
@@ -10,25 +12,26 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def send_email_via_resend(to_email: str, to_name: str, subject: str, body: str) -> str | None:
-    """Send an email via the Resend API. Returns the Resend message ID."""
-    api_key = os.getenv("RESEND_API_KEY")
-    from_email = os.getenv("RESEND_FROM_EMAIL", "superintendent@example.com")
+def send_email_via_gmail(to_email: str, to_name: str, subject: str, body: str) -> str | None:
+    """Send an email via Gmail SMTP using an App Password."""
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_pass = os.getenv("GMAIL_APP_PASSWORD")
 
-    if not api_key or api_key.startswith("re_..."):
+    if not gmail_user or not gmail_pass or gmail_pass.startswith("xxxx"):
         print(f"[EMAIL STUB] Would send to {to_email}: {subject}")
-        return "stub-no-resend-key"
+        return "stub-no-gmail-creds"
 
-    import resend
-    resend.api_key = api_key
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = f"Superintendent AI <{gmail_user}>"
+    msg["To"] = f"{to_name} <{to_email}>"
 
-    result = resend.Emails.send({
-        "from": f"Superintendent AI <{from_email}>",
-        "to": [f"{to_name} <{to_email}>"],
-        "subject": subject,
-        "text": body,
-    })
-    return result.get("id")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(gmail_user, gmail_pass)
+        server.send_message(msg)
+
+    print(f"[EMAIL SENT] To: {to_email} | Subject: {subject}")
+    return f"gmail-{datetime.utcnow().isoformat()}"
 
 
 def poll_gmail_inbox() -> list[dict]:

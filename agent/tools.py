@@ -3,7 +3,7 @@ import json
 from datetime import datetime, date
 from database import SessionLocal
 from models import Project, Task, Contractor, Email, OutreachQueue, Alert
-from services.email_service import send_email_via_resend
+from services.email_service import send_email_via_gmail
 
 
 def get_project_context(project_id: int) -> dict:
@@ -130,7 +130,7 @@ def send_email(to_email: str, to_name: str, subject: str, body: str,
     """Send an email via Resend and log it."""
     db = SessionLocal()
     try:
-        resend_id = send_email_via_resend(to_email, to_name, subject, body)
+        resend_id = send_email_via_gmail(to_email, to_name, subject, body)
 
         email_record = Email(
             task_id=task_id,

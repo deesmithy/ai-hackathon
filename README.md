@@ -19,10 +19,8 @@ Open http://localhost:8000
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Claude API key |
-| `RESEND_API_KEY` | No | Resend API key for real email sending |
-| `RESEND_FROM_EMAIL` | No | Sender email for outreach |
-| `GMAIL_USER` | No | Gmail address for IMAP polling |
-| `GMAIL_APP_PASSWORD` | No | Gmail App Password for IMAP |
+| `GMAIL_USER` | Yes | Gmail address for sending + receiving |
+| `GMAIL_APP_PASSWORD` | Yes | Gmail App Password (not regular password) |
 | `DATABASE_URL` | No | Defaults to `sqlite:///./superintendent.db` |
 | `APP_PORT` | No | Defaults to `8000` |
 
